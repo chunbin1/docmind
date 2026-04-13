@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /Users/lee/myCode/docmind/packages/server/.env*)",
+      "Bash(pnpm add:*)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

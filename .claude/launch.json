@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docmind-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@docmind/server", "dev"],
+      "port": 3001
+    },
+    {
+      "name": "docmind-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@docmind/client", "dev"],
+      "port": 5173
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "docmind",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "pnpm --filter @docmind/server dev",
+    "dev:client": "pnpm --filter @docmind/client dev",
+    "build:client": "pnpm --filter @docmind/client build"
+  }
+}

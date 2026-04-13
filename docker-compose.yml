@@ -1,0 +1,38 @@
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+  server:
+    build:
+      context: ./packages/server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./packages/server/.env
+    environment:
+      - CHROMA_URL=http://chroma:8000
+    depends_on:
+      - chroma
+    volumes:
+      - uploads:/app/uploads
+
+  client:
+    build:
+      context: ./packages/client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+
+volumes:
+  chroma_data:
+  uploads:
