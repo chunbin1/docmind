@@ -5,3 +5,4 @@ packages/client/dist/
 *.log
 chroma_data/
 uploads/
+.claude/settings.local.json
