@@ -36,6 +36,26 @@ async function* streamAnthropic({ messages, system, maxTokens }) {
 }
 
 // ── Zhipu AI (OpenAI-compatible) ───────────────────────────────────────────
+
+/**
+ * Parse ZHIPU_MODEL env var into an ordered list of model names.
+ * Supports comma-separated fallback list, e.g.:
+ *   ZHIPU_MODEL=glm-4.6v-flashx,glm-4.7,glm-4.6v,glm-4.5-air
+ * Falls back to ['glm-4-flash'] if unset.
+ */
+function getZhipuModels() {
+  const raw = process.env.ZHIPU_MODEL || 'glm-4-flash'
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+/** Error codes / messages that indicate quota exhaustion — trigger model fallback. */
+function isQuotaError(err) {
+  const code = err?.status ?? err?.code ?? err?.error?.code
+  const msg = (err?.message ?? err?.error?.message ?? '').toLowerCase()
+  // 429 Too Many Requests, or explicit quota/billing keywords
+  return code === 429 || msg.includes('quota') || msg.includes('insufficient') || msg.includes('billing')
+}
+
 async function* streamZhipu({ messages, system, maxTokens }) {
   const { default: OpenAI } = await import('openai')
   const client = new OpenAI({
@@ -47,16 +67,31 @@ async function* streamZhipu({ messages, system, maxTokens }) {
     ? [{ role: 'system', content: system }, ...messages]
     : messages
 
-  const stream = await client.chat.completions.create({
-    model: process.env.ZHIPU_MODEL || 'glm-4-flash',
-    max_tokens: maxTokens,
-    stream: true,
-    messages: allMessages,
-  })
+  const models = getZhipuModels()
 
-  for await (const chunk of stream) {
-    const text = chunk.choices[0]?.delta?.content
-    if (text) yield text
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i]
+    try {
+      const stream = await client.chat.completions.create({
+        model,
+        max_tokens: maxTokens,
+        stream: true,
+        messages: allMessages,
+      })
+
+      for await (const chunk of stream) {
+        const text = chunk.choices[0]?.delta?.content
+        if (text) yield text
+      }
+      return // success — done
+    } catch (err) {
+      const hasNext = i < models.length - 1
+      if (isQuotaError(err) && hasNext) {
+        console.warn(`[llm] model "${model}" quota exhausted, switching to "${models[i + 1]}"`)
+        continue
+      }
+      throw err // non-quota error or last model — propagate
+    }
   }
 }
 
