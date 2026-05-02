@@ -3,6 +3,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 const STORAGE_KEY = 'docmind:chat:messages'
 const COMPACT_THRESHOLD = 12000  // 估算 token 超过此值触发压缩
 const COMPACT_KEEP_RECENT = 6    // 压缩时保留最近 N 条完整消息
+const NUDGE_INTERVAL = 10        // 每 N 轮触发一次后台记忆提取
 const PIN_KEYWORDS = ['记住这个', '记住', '重要', '不要忘记', '关键信息', 'remember this', 'important']
 
 function estimateTokens(text) {
@@ -30,6 +31,11 @@ export function useChat() {
   const [compacting, setCompacting] = useState(false)
   const abortRef = useRef(null)
   const saveTimerRef = useRef(null)
+  const turnCountRef = useRef(0)       // tracks completed turns for nudge
+  const messagesRef = useRef(messages) // stable ref for use in callbacks
+
+  // keep messagesRef in sync
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   // 持久化：流式结束后 debounce 500ms 写入 localStorage
   useEffect(() => {
@@ -66,6 +72,24 @@ export function useChat() {
     })
   }
 
+  // 后台静默提取记忆（fire-and-forget，失败无声）
+  const triggerNudge = useCallback(() => {
+    const recent = messagesRef.current
+      .filter(m => m.role !== 'summary')
+      .slice(-10)
+    if (recent.length === 0) return
+
+    fetch('/api/chat/nudge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: recent }),
+    })
+      .then(res => {
+        if (res.ok) window.dispatchEvent(new CustomEvent('memory:updated'))
+      })
+      .catch(() => {})
+  }, [])
+
   // 自动压缩：把旧消息送给 AI 生成摘要，替换旧消息（参考 Claude Code 的做法）
   const compactIfNeeded = useCallback(async (currentMessages) => {
     const chatMessages = currentMessages.filter(m => m.role !== 'summary')
@@ -84,6 +108,8 @@ export function useChat() {
       })
       if (!res.ok) throw new Error('compact failed')
       const { summary } = await res.json()
+      // facts are persisted server-side; notify MemoryPanel to refresh
+      window.dispatchEvent(new CustomEvent('memory:updated'))
 
       const summaryMsg = {
         role: 'summary',
@@ -159,7 +185,14 @@ export function useChat() {
             const json = JSON.parse(line.slice(6))
             if (json.error) throw new Error(json.error)
             if (json.text) appendToLast(json.text)
-            if (json.done) return
+            if (json.done) {
+              // Increment turn counter; trigger nudge every NUDGE_INTERVAL turns
+              turnCountRef.current += 1
+              if (turnCountRef.current % NUDGE_INTERVAL === 0) {
+                triggerNudge()
+              }
+              return
+            }
           } catch (parseErr) {
             // 跳过无法解析的 chunk
           }
@@ -173,7 +206,7 @@ export function useChat() {
       setStreaming(false)
       abortRef.current = null
     }
-  }, [messages, streaming, compactIfNeeded])
+  }, [messages, streaming, compactIfNeeded, triggerNudge])
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort()

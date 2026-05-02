@@ -5,6 +5,9 @@ import 'dotenv/config'
 
 import { chatRoutes } from './routes/chat.js'
 import { documentRoutes } from './routes/documents.js'
+import { memoryRoutes } from './routes/memory.js'
+import { initDb } from './services/memoryStore.js'
+import { initCollection } from './services/memoryVector.js'
 
 const app = Fastify({
   logger: {
@@ -23,8 +26,13 @@ await app.register(multipart, {
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 })
 
+// Initialize memory persistence layer
+initDb()
+await initCollection()
+
 await app.register(chatRoutes, { prefix: '/api' })
 await app.register(documentRoutes, { prefix: '/api' })
+await app.register(memoryRoutes, { prefix: '/api' })
 
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 

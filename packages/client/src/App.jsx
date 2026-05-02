@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useChat } from './hooks/useChat'
 import { Message } from './components/Message'
 import { ChatInput } from './components/ChatInput'
+import { MemoryPanel } from './components/MemoryPanel'
 import styles from './App.module.css'
 
 export default function App() {
@@ -29,6 +30,8 @@ export default function App() {
             <p>上传文档开始问答</p>
           </div>
         </div>
+
+        <MemoryPanel />
 
         <div className={styles.sideBottom}>
           <button className={styles.clearBtn} onClick={clearMessages}>
