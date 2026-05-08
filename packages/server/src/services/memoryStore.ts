@@ -1,25 +1,18 @@
-/**
- * Memory Notes Store — SQLite-backed persistent storage with FTS5 search.
- *
- * Schema:
- *   memory_notes      — structured rows
- *   memory_notes_fts  — FTS5 virtual table for keyword search (fallback)
- *
- * Limits: max 100 notes, single note ≤ 200 chars.
- */
-
+// packages/server/src/services/memoryStore.ts
 import Database from 'better-sqlite3'
-import { mkdirSync } from 'fs'
-import { join } from 'path'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import type { MemoryNote } from '../types.js'
 
 const DATA_DIR = join(process.cwd(), 'data')
 const DB_PATH = join(DATA_DIR, 'memory.db')
 const MAX_NOTES = 100
 const MAX_NOTE_CHARS = 200
 
-let _db = null
+type DB = InstanceType<typeof Database>
+let _db: DB | null = null
 
-export function initDb() {
+export function initDb(): DB {
   mkdirSync(DATA_DIR, { recursive: true })
   _db = new Database(DB_PATH)
   _db.pragma('journal_mode = WAL')
@@ -55,20 +48,16 @@ export function initDb() {
   return _db
 }
 
-function db() {
+function db(): DB {
   if (!_db) throw new Error('memoryStore not initialized — call initDb() first')
   return _db
 }
 
-function genId() {
+function genId(): string {
   return `mem_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`
 }
 
-/**
- * Add a single note. Evicts oldest notes if over MAX_NOTES.
- * @returns {object} the saved note row
- */
-export function addNote(content, source = 'manual') {
+export function addNote(content: string, source = 'manual'): MemoryNote | null {
   const trimmed = String(content).trim().slice(0, MAX_NOTE_CHARS)
   if (!trimmed) return null
 
@@ -76,15 +65,17 @@ export function addNote(content, source = 'manual') {
   const created_at = new Date().toISOString()
 
   db().prepare(
-    'INSERT INTO memory_notes (id, content, source, created_at) VALUES (?, ?, ?, ?)'
+    'INSERT INTO memory_notes (id, content, source, created_at) VALUES (?, ?, ?, ?)',
   ).run(id, trimmed, source, created_at)
 
-  // Evict oldest if over limit
-  const count = db().prepare('SELECT COUNT(*) as c FROM memory_notes').get().c
-  if (count > MAX_NOTES) {
-    const oldest = db().prepare(
-      'SELECT id FROM memory_notes ORDER BY created_at ASC LIMIT ?'
-    ).all(count - MAX_NOTES)
+  const countRow = db()
+    .prepare('SELECT COUNT(*) as c FROM memory_notes')
+    .get() as { c: number }
+
+  if (countRow.c > MAX_NOTES) {
+    const oldest = db()
+      .prepare('SELECT id FROM memory_notes ORDER BY created_at ASC LIMIT ?')
+      .all(countRow.c - MAX_NOTES) as { id: string }[]
     const del = db().prepare('DELETE FROM memory_notes WHERE id = ?')
     for (const row of oldest) del.run(row.id)
   }
@@ -92,44 +83,29 @@ export function addNote(content, source = 'manual') {
   return { id, content: trimmed, source, created_at }
 }
 
-/**
- * Add multiple notes in a transaction.
- * @param {string[]} contents
- * @param {string} source
- * @returns {object[]} saved note rows
- */
-export function addNotes(contents, source = 'manual') {
-  const insert = db().transaction((items) => {
-    return items
-      .map(c => addNote(c, source))
-      .filter(Boolean)
-  })
+export function addNotes(contents: string[], source = 'manual'): MemoryNote[] {
+  const insert = db().transaction((items: string[]) =>
+    items.map(c => addNote(c, source)).filter((n): n is MemoryNote => n !== null),
+  )
   return insert(contents)
 }
 
-export function deleteNote(id) {
+export function deleteNote(id: string): void {
   db().prepare('DELETE FROM memory_notes WHERE id = ?').run(id)
 }
 
-export function clearAll() {
+export function clearAll(): void {
   db().prepare('DELETE FROM memory_notes').run()
 }
 
-export function getAllNotes() {
-  return db().prepare(
-    'SELECT * FROM memory_notes ORDER BY created_at DESC'
-  ).all()
+export function getAllNotes(): MemoryNote[] {
+  return db()
+    .prepare('SELECT * FROM memory_notes ORDER BY created_at DESC')
+    .all() as MemoryNote[]
 }
 
-/**
- * FTS5 keyword search — used as fallback when ChromaDB is unavailable.
- * @param {string} query
- * @param {number} limit
- * @returns {object[]}
- */
-export function searchFts(query, limit = 5) {
-  if (!query || !query.trim()) return []
-  // Sanitize query: remove FTS5 special chars to avoid syntax errors
+export function searchFts(query: string, limit = 5): MemoryNote[] {
+  if (!query?.trim()) return []
   const safe = query.replace(/["*()]/g, ' ').trim()
   if (!safe) return []
   try {
@@ -140,24 +116,20 @@ export function searchFts(query, limit = 5) {
       WHERE memory_notes_fts MATCH ?
       ORDER BY rank
       LIMIT ?
-    `).all(safe, limit)
+    `).all(safe, limit) as MemoryNote[]
   } catch {
     return []
   }
 }
 
-export function getTotalChars() {
-  const row = db().prepare(
-    "SELECT COALESCE(SUM(LENGTH(content)), 0) as total FROM memory_notes"
-  ).get()
+export function getTotalChars(): number {
+  const row = db()
+    .prepare("SELECT COALESCE(SUM(LENGTH(content)), 0) as total FROM memory_notes")
+    .get() as { total: number }
   return row.total
 }
 
-/**
- * Format notes for injection into system prompt.
- * Returns empty string when no notes exist.
- */
-export function formatForPrompt(notes) {
+export function formatForPrompt(notes: MemoryNote[]): string {
   if (!notes || notes.length === 0) return ''
   const lines = notes.map(n => `- ${n.content}`).join('\n')
   return `--- 相关记忆 ---\n${lines}`
