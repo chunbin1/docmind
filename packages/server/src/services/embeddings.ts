@@ -1,13 +1,9 @@
-/**
- * Embedding service — wraps Zhipu embedding-3 (OpenAI-compatible).
- * Falls back gracefully when ZHIPU_API_KEY is not set.
- */
-
+// packages/server/src/services/embeddings.ts
 import OpenAI from 'openai'
 
-let _client = null
+let _client: OpenAI | null = null
 
-function getClient() {
+function getClient(): OpenAI {
   if (!_client) {
     _client = new OpenAI({
       apiKey: process.env.ZHIPU_API_KEY,
@@ -17,18 +13,16 @@ function getClient() {
   return _client
 }
 
-export function isEmbeddingAvailable() {
+export function isEmbeddingAvailable(): boolean {
   return Boolean(process.env.ZHIPU_API_KEY)
 }
 
 /**
  * Embed a single text string.
- * @param {string} text
- * @returns {Promise<number[]>}
  */
-export async function embed(text) {
+export async function embed(text: string): Promise<number[]> {
   const res = await getClient().embeddings.create({
-    model: process.env.ZHIPU_EMBEDDING_MODEL || 'embedding-3',
+    model: process.env.ZHIPU_EMBEDDING_MODEL ?? 'embedding-3',
     input: text,
   })
   return res.data[0].embedding
@@ -36,13 +30,11 @@ export async function embed(text) {
 
 /**
  * Embed multiple texts in one API call.
- * @param {string[]} texts
- * @returns {Promise<number[][]>}
  */
-export async function embedBatch(texts) {
+export async function embedBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return []
   const res = await getClient().embeddings.create({
-    model: process.env.ZHIPU_EMBEDDING_MODEL || 'embedding-3',
+    model: process.env.ZHIPU_EMBEDDING_MODEL ?? 'embedding-3',
     input: texts,
   })
   return res.data.map(d => d.embedding)
