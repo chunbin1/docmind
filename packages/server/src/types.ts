@@ -31,3 +31,21 @@ export interface ParsedCompact {
   summary: string
   facts: string[]
 }
+
+/** A persisted document row from SQLite */
+export interface Document {
+  id: string
+  filename: string
+  size_bytes: number
+  chunk_count: number
+  created_at: string
+}
+
+/** A chunk returned from ChromaDB semantic search */
+export interface DocumentChunk {
+  doc_id: string
+  filename: string
+  chunk_index: number
+  content: string
+  distance: number
+}

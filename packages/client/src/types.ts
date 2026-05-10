@@ -39,3 +39,12 @@ export interface UseChatReturn {
   clearMessages: () => void
   togglePin: (index: number) => void
 }
+
+/** A persisted document available for attachment */
+export interface Document {
+  id: string
+  filename: string
+  size_bytes: number
+  chunk_count: number
+  created_at: string
+}
