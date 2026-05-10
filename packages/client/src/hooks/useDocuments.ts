@@ -70,7 +70,8 @@ export function useDocuments(): UseDocumentsReturn {
   }, [attach])
 
   const remove = useCallback(async (docId: string) => {
-    await fetch(`${API}/documents/${docId}`, { method: 'DELETE' })
+    const res = await fetch(`${API}/documents/${docId}`, { method: 'DELETE' })
+    if (!res.ok) return
     setDocuments(prev => prev.filter(d => d.id !== docId))
     setAttachedIds(prev => prev.filter(id => id !== docId))
   }, [])

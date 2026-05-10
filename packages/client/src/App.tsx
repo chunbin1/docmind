@@ -31,14 +31,6 @@ export default function App() {
           <span className={styles.logoText}>DocMind</span>
         </div>
 
-        <div className={styles.sideSection}>
-          <p className={styles.sideLabel}>文档</p>
-          <div className={styles.emptyDocs}>
-            <p>里程碑 2 实现</p>
-            <p>上传文档开始问答</p>
-          </div>
-        </div>
-
         <MemoryPanel />
 
         <div className={styles.sideBottom}>

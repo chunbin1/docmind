@@ -64,7 +64,7 @@ function recursiveSplit(
     let start = 0
     while (start < text.length) {
       chunks.push(text.slice(start, start + chunkSize))
-      start += chunkSize - overlap
+      start += Math.max(1, chunkSize - overlap)
     }
     return chunks
   }

@@ -35,7 +35,7 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
       parseResult = await parsePdf(buffer)
     } catch (err) {
       if (isParseError(err)) {
-        const status = err.code === 'EMPTY_TEXT' ? 422 : 400
+        const status = err.code === 'EMPTY_TEXT' ? 422 : err.code === 'TOO_LARGE' ? 413 : 400
         return reply.status(status).send({ error: err.message })
       }
       return reply.status(500).send({ error: 'PDF 处理失败' })

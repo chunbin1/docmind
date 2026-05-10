@@ -69,7 +69,9 @@ export async function searchChunks(
     const results = await _collection.query({
       queryEmbeddings: [queryEmbedding],
       nResults: topK,
-      where: { doc_id: { $in: docIds } },
+      where: docIds.length === 1
+        ? { doc_id: { $eq: docIds[0] } }
+        : { doc_id: { $in: docIds } },
     })
 
     const ids = results.ids[0] ?? []

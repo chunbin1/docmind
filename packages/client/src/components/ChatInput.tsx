@@ -103,7 +103,7 @@ export function ChatInput({
           uploadError={uploadError}
           onAttach={onAttach}
           onDetach={onDetach}
-          onUpload={file => { onUpload(file); setPickerOpen(false) }}
+          onUpload={onUpload}
           onRemove={onRemoveDoc}
           onClose={() => setPickerOpen(false)}
         />
