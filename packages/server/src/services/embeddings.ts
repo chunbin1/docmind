@@ -14,6 +14,7 @@ function getClient(): OpenAI {
 }
 
 export function isEmbeddingAvailable(): boolean {
+  if (process.env.DISABLE_EMBEDDING === 'true') return false
   return Boolean(process.env.ZHIPU_API_KEY)
 }
 

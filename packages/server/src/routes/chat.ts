@@ -1,12 +1,87 @@
 // packages/server/src/routes/chat.ts
 import type { FastifyPluginAsync } from 'fastify'
+import OpenAI from 'openai'
 import { streamChat, PROVIDER } from '../llm.js'
 import { addNotes, searchFts } from '../services/memoryStore.js'
 import { upsertNote, semanticSearch, isVectorAvailable } from '../services/memoryVector.js'
 import type { LLMMessage, MemoryNote, ParsedCompact } from '../types.js'
+import { getWeather } from '../tools/weather.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
+
+// 工具定义（OpenAI function calling 格式）
+const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: '获取指定城市的实时天气信息',
+      parameters: {
+        type: 'object',
+        properties: {
+          city: { type: 'string', description: '城市名称，如 广州、北京、上海' },
+        },
+        required: ['city'],
+      },
+    },
+  },
+]
+
+/**
+ * 工具预检：询问模型是否需要调用工具，若需要则执行并返回结果字符串
+ * 只对 zhipu provider 生效（OpenAI 兼容格式）
+ */
+async function runToolsIfNeeded(
+  message: string,
+  history: LLMMessage[],
+): Promise<string> {
+  if (PROVIDER !== 'zhipu') return ''
+
+  const client = new OpenAI({
+    apiKey: process.env.ZHIPU_API_KEY,
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4/',
+  })
+
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    { role: 'user', content: message },
+  ]
+
+  let response: OpenAI.Chat.ChatCompletion
+  try {
+    response = await client.chat.completions.create({
+      model: process.env.ZHIPU_MODEL ?? 'glm-4.7',
+      messages,
+      tools: TOOLS,
+      tool_choice: 'auto',
+      max_tokens: 256,
+      stream: false,
+    })
+  } catch {
+    return '' // 工具预检失败不影响主流程
+  }
+
+  const toolCalls = response.choices[0]?.message?.tool_calls
+  if (!toolCalls?.length) return ''
+
+  const results: string[] = []
+  for (const tc of toolCalls) {
+    try {
+      const fn = (tc as { function?: { name: string; arguments: string } }).function
+      if (!fn) continue
+      const args = JSON.parse(fn.arguments) as Record<string, string>
+      if (fn.name === 'get_weather') {
+        const result = await getWeather(args.city ?? '')
+        results.push(result)
+      }
+    } catch {
+      // 单个工具失败跳过
+    }
+  }
+
+  return results.length ? `\n\n--- 实时工具结果 ---\n${results.join('\n')}` : ''
+}
 
 function estimateTokens(text: string): number {
   return Math.ceil((text || '').length / 3)
@@ -89,12 +164,16 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'message is required' })
     }
 
-    const relevantNotes = await getRelevantNotes(message)
+    const [relevantNotes, toolSection] = await Promise.all([
+      getRelevantNotes(message),
+      runToolsIfNeeded(message, history),
+    ])
+
     const memSection = relevantNotes.length
       ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
       : ''
 
-    const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection]
+    const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, toolSection]
       .filter(Boolean)
       .join('\n\n')
 
