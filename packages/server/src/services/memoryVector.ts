@@ -1,27 +1,10 @@
 // packages/server/src/services/memoryVector.ts
-import { ChromaClient, type EmbeddingFunction } from 'chromadb'
-import { embed, embedBatch, isEmbeddingAvailable } from './embeddings.js'
+import { ChromaClient } from 'chromadb'
+import { embed, isEmbeddingAvailable, ZhipuEmbeddingFunction } from './embeddings.js'
 import type { MemoryNote } from '../types.js'
 
 const COLLECTION_NAME = 'docmind_memory'
 const CHROMA_URL = process.env.CHROMA_URL ?? 'http://localhost:8000'
-
-// Custom embedding function using Zhipu API
-class ZhipuEmbeddingFunction implements EmbeddingFunction {
-  name = 'zhipu'
-
-  async generate(texts: string[]): Promise<number[][]> {
-    return embedBatch(texts)
-  }
-
-  defaultSpace() {
-    return 'cosine' as const
-  }
-
-  supportedSpaces() {
-    return ['cosine', 'l2', 'ip'] as const
-  }
-}
 
 // Infer Collection type from the client to avoid chromadb named-export fragility
 type ChromaCollection = Awaited<ReturnType<ChromaClient['getOrCreateCollection']>>

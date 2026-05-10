@@ -1,27 +1,10 @@
 // packages/server/src/services/documentVector.ts
-import { ChromaClient, type EmbeddingFunction } from 'chromadb'
-import { embedBatch, isEmbeddingAvailable } from './embeddings.js'
+import { ChromaClient } from 'chromadb'
+import { embedBatch, isEmbeddingAvailable, ZhipuEmbeddingFunction } from './embeddings.js'
 import type { DocumentChunk } from '../types.js'
 
 const COLLECTION_NAME = 'docmind_docs'
 const CHROMA_URL = process.env.CHROMA_URL ?? 'http://localhost:8000'
-
-// Custom embedding function using Zhipu API
-class ZhipuEmbeddingFunction implements EmbeddingFunction {
-  name = 'zhipu'
-
-  async generate(texts: string[]): Promise<number[][]> {
-    return embedBatch(texts)
-  }
-
-  defaultSpace() {
-    return 'cosine' as const
-  }
-
-  supportedSpaces() {
-    return ['cosine', 'l2', 'ip'] as const
-  }
-}
 
 // Infer Collection type from the client to avoid chromadb named-export fragility
 type ChromaCollection = Awaited<ReturnType<ChromaClient['getOrCreateCollection']>>
@@ -62,9 +45,6 @@ export async function upsertChunks(
 
   try {
     const embeddings = await embedBatch(chunks)
-    console.log(`[documentVector] embedBatch returned ${embeddings.length} vectors, dimension: ${embeddings[0]?.length}`)
-    console.log(`[documentVector] first vector sample:`, embeddings[0]?.slice(0, 5))
-
     const ids = chunks.map((_, i) => `${docId}_chunk_${i}`)
     const metadatas = chunks.map((_, i) => ({ doc_id: docId, filename, chunk_index: i }))
 
@@ -74,7 +54,6 @@ export async function upsertChunks(
       documents: chunks,
       metadatas,
     })
-    console.log(`[documentVector] upsert completed for ${chunks.length} chunks`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`[documentVector] upsertChunks failed: ${msg}`)

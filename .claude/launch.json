@@ -4,16 +4,14 @@
     {
       "name": "docmind-server",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
-      "port": 3001,
-      "cwd": "/Users/lee/myCode/docmind/.claude/worktrees/pdf-document-rag/packages/server"
+      "runtimeArgs": ["--filter", "@docmind/server", "dev"],
+      "port": 3001
     },
     {
       "name": "docmind-client",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
-      "port": 5173,
-      "cwd": "/Users/lee/myCode/docmind/.claude/worktrees/pdf-document-rag/packages/client"
+      "runtimeArgs": ["--filter", "@docmind/client", "dev"],
+      "port": 5173
     }
   ]
 }

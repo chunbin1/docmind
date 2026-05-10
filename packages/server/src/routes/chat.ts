@@ -115,10 +115,7 @@ async function getRelevantNotes(query: string, topK = 3): Promise<MemoryNote[]> 
 
 async function getRelevantChunks(query: string, docIds: string[]): Promise<DocumentChunk[]> {
   if (!docIds.length || !isDocVectorAvailable()) return []
-  const chunks = await searchChunks(query, docIds, 3)
-  console.log('[RAG] query:', query)
-  console.log('[RAG] retrieved chunks:', chunks.map(c => `chunk_${c.chunk_index}(dist=${c.distance.toFixed(3)}): ${c.content.slice(0, 80)}`))
-  return chunks
+  return searchChunks(query, docIds, 3)
 }
 
 function persistFacts(facts: string[], source: string): MemoryNote[] {
