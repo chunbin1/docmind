@@ -52,7 +52,7 @@ importers:
         version: 0.3.34(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(zod@3.25.76)
       '@langchain/community':
         specifier: ^0.3.31
-        version: 0.3.59(@browserbasehq/sdk@2.10.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.11(typescript@6.0.3))(@langchain/anthropic@0.3.34(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(zod@3.25.76))(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(axios@1.15.0)(better-sqlite3@12.9.0)(chromadb@1.10.5(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(fast-xml-parser@4.5.6)(ibm-cloud-sdk-core@5.4.11)(jsonwebtoken@9.0.3)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(pdf-parse@1.1.4)(playwright@1.59.1)(weaviate-client@3.12.1)(ws@8.20.0)
+        version: 0.3.59(@browserbasehq/sdk@2.10.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.11(typescript@6.0.3))(@langchain/anthropic@0.3.34(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(zod@3.25.76))(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(axios@1.15.0)(better-sqlite3@12.9.0)(chromadb@3.4.3)(fast-xml-parser@4.5.6)(ibm-cloud-sdk-core@5.4.11)(jsonwebtoken@9.0.3)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(pdf-parse@1.1.4)(playwright@1.59.1)(weaviate-client@3.12.1)(ws@8.20.0)
       '@langchain/core':
         specifier: ^0.3.40
         version: 0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76))
@@ -60,8 +60,8 @@ importers:
         specifier: ^12.9.0
         version: 12.9.0
       chromadb:
-        specifier: ^1.9.2
-        version: 1.10.5(openai@6.34.0(ws@8.20.0)(zod@3.25.76))
+        specifier: ^3.4.3
+        version: 3.4.3
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -1422,26 +1422,42 @@ packages:
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
 
-  chromadb@1.10.5:
-    resolution: {integrity: sha512-+IeTjjf44pKUY3vp1BacwO2tFAPcWCd64zxPZZm98dVj/kbSBeaHKB2D6eX7iRLHS1PTVASuqoR6mAJ+nrsTBg==}
-    engines: {node: '>=14.17.0'}
-    peerDependencies:
-      '@google/generative-ai': ^0.1.1
-      cohere-ai: ^5.0.0 || ^6.0.0 || ^7.0.0
-      ollama: ^0.5.0
-      openai: ^3.0.0 || ^4.0.0
-      voyageai: ^0.0.3-1
-    peerDependenciesMeta:
-      '@google/generative-ai':
-        optional: true
-      cohere-ai:
-        optional: true
-      ollama:
-        optional: true
-      openai:
-        optional: true
-      voyageai:
-        optional: true
+  chromadb-js-bindings-darwin-arm64@1.3.4:
+    resolution: {integrity: sha512-pDdWCcR0hCz3pSDiIijBito7YG6FumewfzYE2mIjSwjrO1CKSfQKLwDdTVK4ZNpVGQa16ePoMX+pg7ShSUARJg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  chromadb-js-bindings-darwin-x64@1.3.4:
+    resolution: {integrity: sha512-5vKVFXSFo+S9qC9by/7oofjcXqQK4IGHiUnPrvTfc7B52gNlPSKeyDO1wha556COc3KtXSZjICEH0nYBJ8UXng==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  chromadb-js-bindings-linux-arm64-gnu@1.3.4:
+    resolution: {integrity: sha512-ELiqDZzU5mZd1BvZugGrhoMkVeNyQaa+PGizd06WIpIJVoHY+S+9ZBjdeM6ZkRnL3vTxD79XBrosxNWhzqy/kg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  chromadb-js-bindings-linux-x64-gnu@1.3.4:
+    resolution: {integrity: sha512-HmTUe7PEIaBngCQ70Yyle81z2wYyg9OMgJYyRUNBYCBp4ED6zTmdaOro41Vs/c/h2UyQeBXFIKNmHDeD2Nr2fw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  chromadb-js-bindings-win32-x64-msvc@1.3.4:
+    resolution: {integrity: sha512-punrofQRzKspNMxHmv24qoPeRycV2T3KfedekGV4lOuPPG14i6qggS4x/OWLSAK7ozPfBbrzCejvCa5wfvujhQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  chromadb@3.4.3:
+    resolution: {integrity: sha512-AouHyTh70Ux1w5TKDmk54wGAszY7NtU/DXyC7o3qGuE8b+b1nT/W3+s8UVd9XwqGZIR4A76+g4u7yJuV/WU3OA==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -1799,9 +1815,6 @@ packages:
   is-plain-obj@4.1.0:
     resolution: {integrity: sha512-+Pgi+vMuUNkJyExiMBt5IlFoMyKnr5zhJ4Uspz58WOhBF5QoIZkFyNHIbBAtHwzVAgk5RtndVNsDRN61/mmDqg==}
     engines: {node: '>=12'}
-
-  isomorphic-fetch@3.0.0:
-    resolution: {integrity: sha512-qvUtwJ3j6qwsF3jLxkZ72qCgjMysPzDfeV240JHiGZsANBYd+EEuu35v7dfrJ9Up0Ak07D7GGSkGhCHTqg/5wA==}
 
   isstream@0.1.2:
     resolution: {integrity: sha512-Yljz7ffyPbrLpLngrMtZ7NduUgVvi6wG9RJ9IUcyCd59YQ911PBJphODUcbOVbqYfxe1wuYf/LJ8PauMRwsM/g==}
@@ -2618,9 +2631,6 @@ packages:
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
 
-  whatwg-fetch@3.6.20:
-    resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
-
   whatwg-url@5.0.0:
     resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
 
@@ -3121,7 +3131,7 @@ snapshots:
     transitivePeerDependencies:
       - zod
 
-  '@langchain/community@0.3.59(@browserbasehq/sdk@2.10.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.11(typescript@6.0.3))(@langchain/anthropic@0.3.34(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(zod@3.25.76))(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(axios@1.15.0)(better-sqlite3@12.9.0)(chromadb@1.10.5(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(fast-xml-parser@4.5.6)(ibm-cloud-sdk-core@5.4.11)(jsonwebtoken@9.0.3)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(pdf-parse@1.1.4)(playwright@1.59.1)(weaviate-client@3.12.1)(ws@8.20.0)':
+  '@langchain/community@0.3.59(@browserbasehq/sdk@2.10.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(zod@3.25.76))(@ibm-cloud/watsonx-ai@1.7.11(typescript@6.0.3))(@langchain/anthropic@0.3.34(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(zod@3.25.76))(@langchain/core@0.3.80(openai@6.34.0(ws@8.20.0)(zod@3.25.76)))(axios@1.15.0)(better-sqlite3@12.9.0)(chromadb@3.4.3)(fast-xml-parser@4.5.6)(ibm-cloud-sdk-core@5.4.11)(jsonwebtoken@9.0.3)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(pdf-parse@1.1.4)(playwright@1.59.1)(weaviate-client@3.12.1)(ws@8.20.0)':
     dependencies:
       '@browserbasehq/stagehand': 1.14.0(@playwright/test@1.59.1)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@6.34.0(ws@8.20.0)(zod@3.25.76))(zod@3.25.76)
       '@ibm-cloud/watsonx-ai': 1.7.11(typescript@6.0.3)
@@ -3141,7 +3151,7 @@ snapshots:
     optionalDependencies:
       '@browserbasehq/sdk': 2.10.0
       better-sqlite3: 12.9.0
-      chromadb: 1.10.5(openai@6.34.0(ws@8.20.0)(zod@3.25.76))
+      chromadb: 3.4.3
       fast-xml-parser: 4.5.6
       jsonwebtoken: 9.0.3
       pdf-parse: 1.1.4
@@ -3548,14 +3558,30 @@ snapshots:
 
   chownr@1.1.4: {}
 
-  chromadb@1.10.5(openai@6.34.0(ws@8.20.0)(zod@3.25.76)):
+  chromadb-js-bindings-darwin-arm64@1.3.4:
+    optional: true
+
+  chromadb-js-bindings-darwin-x64@1.3.4:
+    optional: true
+
+  chromadb-js-bindings-linux-arm64-gnu@1.3.4:
+    optional: true
+
+  chromadb-js-bindings-linux-x64-gnu@1.3.4:
+    optional: true
+
+  chromadb-js-bindings-win32-x64-msvc@1.3.4:
+    optional: true
+
+  chromadb@3.4.3:
     dependencies:
-      cliui: 8.0.1
-      isomorphic-fetch: 3.0.0
+      semver: 7.7.4
     optionalDependencies:
-      openai: 6.34.0(ws@8.20.0)(zod@3.25.76)
-    transitivePeerDependencies:
-      - encoding
+      chromadb-js-bindings-darwin-arm64: 1.3.4
+      chromadb-js-bindings-darwin-x64: 1.3.4
+      chromadb-js-bindings-linux-arm64-gnu: 1.3.4
+      chromadb-js-bindings-linux-x64-gnu: 1.3.4
+      chromadb-js-bindings-win32-x64-msvc: 1.3.4
 
   cliui@8.0.1:
     dependencies:
@@ -3964,13 +3990,6 @@ snapshots:
   is-hexadecimal@2.0.1: {}
 
   is-plain-obj@4.1.0: {}
-
-  isomorphic-fetch@3.0.0:
-    dependencies:
-      node-fetch: 2.7.0
-      whatwg-fetch: 3.6.20
-    transitivePeerDependencies:
-      - encoding
 
   isstream@0.1.2: {}
 
@@ -4902,8 +4921,6 @@ snapshots:
   web-streams-polyfill@4.0.0-beta.3: {}
 
   webidl-conversions@3.0.1: {}
-
-  whatwg-fetch@3.6.20: {}
 
   whatwg-url@5.0.0:
     dependencies:
