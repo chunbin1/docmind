@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useChat } from './hooks/useChat'
+import { useDocuments } from './hooks/useDocuments'
 import { Message } from './components/Message'
 import { ChatInput } from './components/ChatInput'
 import { MemoryPanel } from './components/MemoryPanel'
@@ -15,6 +16,7 @@ export default function App() {
     clearMessages,
     togglePin,
   } = useChat()
+  const docs = useDocuments()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -27,14 +29,6 @@ export default function App() {
         <div className={styles.logo}>
           <span className={styles.logoIcon}>D</span>
           <span className={styles.logoText}>DocMind</span>
-        </div>
-
-        <div className={styles.sideSection}>
-          <p className={styles.sideLabel}>文档</p>
-          <div className={styles.emptyDocs}>
-            <p>里程碑 2 实现</p>
-            <p>上传文档开始问答</p>
-          </div>
         </div>
 
         <MemoryPanel />
@@ -103,9 +97,17 @@ export default function App() {
           <div className={styles.compactingBar}>⚡ 正在压缩历史对话...</div>
         )}
         <ChatInput
-          onSend={msg => void sendMessage(msg)}
+          onSend={(msg, docIds) => void sendMessage(msg, undefined, docIds)}
           onStop={stopStreaming}
           streaming={streaming || compacting}
+          documents={docs.documents}
+          attachedIds={docs.attachedIds}
+          uploading={docs.uploading}
+          uploadError={docs.uploadError}
+          onAttach={docs.attach}
+          onDetach={docs.detach}
+          onUpload={docs.upload}
+          onRemoveDoc={docs.remove}
         />
       </main>
     </div>

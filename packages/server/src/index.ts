@@ -9,6 +9,8 @@ import { documentRoutes } from './routes/documents.js'
 import { memoryRoutes } from './routes/memory.js'
 import { initDb } from './services/memoryStore.js'
 import { initCollection } from './services/memoryVector.js'
+import { initDocumentTables } from './services/documentStore.js'
+import { initDocCollection } from './services/documentVector.js'
 
 const app = Fastify({
   logger: {
@@ -20,15 +22,17 @@ const app = Fastify({
 })
 
 await app.register(cors, {
-  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173'],
 })
 
 await app.register(multipart, {
   limits: { fileSize: 50 * 1024 * 1024 },
 })
 
-initDb()
+const sqliteDb = initDb()
+initDocumentTables(sqliteDb)
 await initCollection()
+await initDocCollection()
 
 await app.register(chatRoutes, { prefix: '/api' })
 await app.register(documentRoutes, { prefix: '/api' })

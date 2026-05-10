@@ -1,19 +1,35 @@
 import { useState } from 'react'
+import type { Document } from '../types'
+import { DocumentChip } from './DocumentChip'
+import { DocumentPicker } from './DocumentPicker'
 import styles from './ChatInput.module.css'
 
 interface ChatInputProps {
-  onSend: (message: string) => void
+  onSend: (message: string, docIds: string[]) => void
   onStop: () => void
   streaming: boolean
   disabled?: boolean
+  documents: Document[]
+  attachedIds: string[]
+  uploading: boolean
+  uploadError: string | null
+  onAttach: (docId: string) => void
+  onDetach: (docId: string) => void
+  onUpload: (file: File) => void
+  onRemoveDoc: (docId: string) => void
 }
 
-export function ChatInput({ onSend, onStop, streaming, disabled }: ChatInputProps) {
+export function ChatInput({
+  onSend, onStop, streaming, disabled,
+  documents, attachedIds, uploading, uploadError,
+  onAttach, onDetach, onUpload, onRemoveDoc,
+}: ChatInputProps) {
   const [value, setValue] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const handleSend = (): void => {
     if (!value.trim() || streaming) return
-    onSend(value.trim())
+    onSend(value.trim(), attachedIds)
     setValue('')
   }
 
@@ -26,7 +42,32 @@ export function ChatInput({ onSend, onStop, streaming, disabled }: ChatInputProp
 
   return (
     <div className={styles.container}>
+      {attachedIds.length > 0 && (
+        <div className={styles.chips}>
+          {attachedIds.map(id => {
+            const doc = documents.find(d => d.id === id)
+            if (!doc) return null
+            return (
+              <DocumentChip
+                key={id}
+                filename={doc.filename}
+                onRemove={() => onDetach(id)}
+              />
+            )
+          })}
+        </div>
+      )}
+
       <div className={styles.inputRow}>
+        <button
+          className={styles.paperclip}
+          onClick={() => setPickerOpen(p => !p)}
+          title="附加文档"
+          type="button"
+        >
+          📎
+        </button>
+
         <textarea
           className={styles.textarea}
           value={value}
@@ -36,6 +77,7 @@ export function ChatInput({ onSend, onStop, streaming, disabled }: ChatInputProp
           rows={1}
           disabled={disabled}
         />
+
         {streaming ? (
           <button className={`${styles.btn} ${styles.stop}`} onClick={onStop}>
             停止
@@ -50,7 +92,22 @@ export function ChatInput({ onSend, onStop, streaming, disabled }: ChatInputProp
           </button>
         )}
       </div>
+
       <p className={styles.hint}>Enter 发送 · Shift+Enter 换行</p>
+
+      {pickerOpen && (
+        <DocumentPicker
+          documents={documents}
+          attachedIds={attachedIds}
+          uploading={uploading}
+          uploadError={uploadError}
+          onAttach={onAttach}
+          onDetach={onDetach}
+          onUpload={onUpload}
+          onRemove={onRemoveDoc}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   )
 }

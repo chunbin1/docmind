@@ -1,6 +1,6 @@
 // packages/server/src/services/memoryVector.ts
 import { ChromaClient } from 'chromadb'
-import { embed, isEmbeddingAvailable } from './embeddings.js'
+import { embed, isEmbeddingAvailable, ZhipuEmbeddingFunction } from './embeddings.js'
 import type { MemoryNote } from '../types.js'
 
 const COLLECTION_NAME = 'docmind_memory'
@@ -20,7 +20,10 @@ export async function initCollection(): Promise<void> {
   }
   try {
     _client = new ChromaClient({ path: CHROMA_URL })
-    _collection = await _client.getOrCreateCollection({ name: COLLECTION_NAME })
+    _collection = await _client.getOrCreateCollection({
+      name: COLLECTION_NAME,
+      embeddingFunction: new ZhipuEmbeddingFunction(),
+    })
     _available = true
     console.info(`[memoryVector] ChromaDB connected — collection "${COLLECTION_NAME}"`)
   } catch (err) {

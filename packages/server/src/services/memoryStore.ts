@@ -9,7 +9,7 @@ const DB_PATH = join(DATA_DIR, 'memory.db')
 const MAX_NOTES = 100
 const MAX_NOTE_CHARS = 200
 
-type DB = InstanceType<typeof Database>
+export type DB = InstanceType<typeof Database>
 let _db: DB | null = null
 
 export function initDb(): DB {
