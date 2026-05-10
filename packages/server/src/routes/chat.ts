@@ -4,7 +4,8 @@ import OpenAI from 'openai'
 import { streamChat, PROVIDER } from '../llm.js'
 import { addNotes, searchFts } from '../services/memoryStore.js'
 import { upsertNote, semanticSearch, isVectorAvailable } from '../services/memoryVector.js'
-import type { LLMMessage, MemoryNote, ParsedCompact } from '../types.js'
+import type { LLMMessage, MemoryNote, ParsedCompact, DocumentChunk } from '../types.js'
+import { searchChunks, isDocVectorAvailable } from '../services/documentVector.js'
 import { getWeather } from '../tools/weather.js'
 
 const DEFAULT_SYSTEM =
@@ -112,6 +113,11 @@ async function getRelevantNotes(query: string, topK = 3): Promise<MemoryNote[]> 
   return searchFts(query, topK)
 }
 
+async function getRelevantChunks(query: string, docIds: string[]): Promise<DocumentChunk[]> {
+  if (!docIds.length || !isDocVectorAvailable()) return []
+  return searchChunks(query, docIds, 3)
+}
+
 function persistFacts(facts: string[], source: string): MemoryNote[] {
   const saved = addNotes(facts, source)
   for (const note of saved) {
@@ -139,6 +145,7 @@ interface StreamBody {
   message: string
   history?: LLMMessage[]
   systemPrompt?: string
+  docIds?: string[]
 }
 
 interface CompactBody {
@@ -158,14 +165,15 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok', provider: PROVIDER }))
 
   app.post<{ Body: StreamBody }>('/chat/stream', async (request, reply) => {
-    const { message, history = [], systemPrompt } = request.body
+    const { message, history = [], systemPrompt, docIds = [] } = request.body
 
     if (!message?.trim()) {
       return reply.status(400).send({ error: 'message is required' })
     }
 
-    const [relevantNotes, toolSection] = await Promise.all([
+    const [relevantNotes, relevantChunks, toolSection] = await Promise.all([
       getRelevantNotes(message),
+      getRelevantChunks(message, docIds),
       runToolsIfNeeded(message, history),
     ])
 
@@ -173,7 +181,11 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
       : ''
 
-    const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, toolSection]
+    const docSection = relevantChunks.length
+      ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
+      : ''
+
+    const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, docSection, toolSection]
       .filter(Boolean)
       .join('\n\n')
 
