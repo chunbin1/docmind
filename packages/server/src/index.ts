@@ -9,6 +9,8 @@ import { documentRoutes } from './routes/documents.js'
 import { memoryRoutes } from './routes/memory.js'
 import { initDb } from './services/memoryStore.js'
 import { initCollection } from './services/memoryVector.js'
+import { initDocumentTables } from './services/documentStore.js'
+import { initDocCollection } from './services/documentVector.js'
 
 const app = Fastify({
   logger: {
@@ -27,8 +29,10 @@ await app.register(multipart, {
   limits: { fileSize: 50 * 1024 * 1024 },
 })
 
-initDb()
+const sqliteDb = initDb()
+initDocumentTables(sqliteDb)
 await initCollection()
+await initDocCollection()
 
 await app.register(chatRoutes, { prefix: '/api' })
 await app.register(documentRoutes, { prefix: '/api' })
