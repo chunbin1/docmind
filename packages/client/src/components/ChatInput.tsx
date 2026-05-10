@@ -1,16 +1,23 @@
 import { useState } from 'react'
 import styles from './ChatInput.module.css'
 
-export function ChatInput({ onSend, onStop, streaming, disabled }) {
+interface ChatInputProps {
+  onSend: (message: string) => void
+  onStop: () => void
+  streaming: boolean
+  disabled?: boolean
+}
+
+export function ChatInput({ onSend, onStop, streaming, disabled }: ChatInputProps) {
   const [value, setValue] = useState('')
 
-  const handleSend = () => {
+  const handleSend = (): void => {
     if (!value.trim() || streaming) return
     onSend(value.trim())
     setValue('')
   }
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()

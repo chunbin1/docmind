@@ -1,3 +1,4 @@
+// packages/server/src/index.ts
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
@@ -23,10 +24,9 @@ await app.register(cors, {
 })
 
 await app.register(multipart, {
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 },
 })
 
-// Initialize memory persistence layer
 initDb()
 await initCollection()
 

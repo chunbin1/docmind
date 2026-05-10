@@ -6,17 +6,23 @@ import { MemoryPanel } from './components/MemoryPanel'
 import styles from './App.module.css'
 
 export default function App() {
-  const { messages, streaming, compacting, sendMessage, stopStreaming, clearMessages, togglePin } = useChat()
-  const bottomRef = useRef(null)
+  const {
+    messages,
+    streaming,
+    compacting,
+    sendMessage,
+    stopStreaming,
+    clearMessages,
+    togglePin,
+  } = useChat()
+  const bottomRef = useRef<HTMLDivElement>(null)
 
-  // 自动滚动到底部
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   return (
     <div className={styles.layout}>
-      {/* 侧边栏 — 里程碑 2 会在这里加文档管理 */}
       <aside className={styles.sidebar}>
         <div className={styles.logo}>
           <span className={styles.logoIcon}>D</span>
@@ -40,7 +46,6 @@ export default function App() {
         </div>
       </aside>
 
-      {/* 主聊天区域 */}
       <main className={styles.main}>
         <header className={styles.header}>
           <div>
@@ -67,7 +72,7 @@ export default function App() {
                   <button
                     key={s}
                     className={styles.suggestion}
-                    onClick={() => sendMessage(s)}
+                    onClick={() => void sendMessage(s)}
                   >
                     {s}
                   </button>
@@ -84,7 +89,9 @@ export default function App() {
                 isError={msg.isError}
                 pinned={msg.pinned}
                 compactedCount={msg.compactedCount}
-                isStreaming={streaming && i === messages.length - 1 && msg.role === 'assistant'}
+                isStreaming={
+                  streaming && i === messages.length - 1 && msg.role === 'assistant'
+                }
                 onTogglePin={togglePin}
               />
             ))
@@ -96,7 +103,7 @@ export default function App() {
           <div className={styles.compactingBar}>⚡ 正在压缩历史对话...</div>
         )}
         <ChatInput
-          onSend={sendMessage}
+          onSend={msg => void sendMessage(msg)}
           onStop={stopStreaming}
           streaming={streaming || compacting}
         />

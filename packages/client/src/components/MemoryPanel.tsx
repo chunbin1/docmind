@@ -1,30 +1,36 @@
 import { useState, useEffect, useCallback } from 'react'
+import type { MemoryNote, MemoryStore } from '../types'
 import styles from './MemoryPanel.module.css'
 
 const MAX_CHARS = 20000
-const SOURCE_LABELS = { nudge: '自动', compact: '压缩', manual: '手动' }
+const SOURCE_LABELS: Record<string, string> = {
+  nudge: '自动',
+  compact: '压缩',
+  manual: '手动',
+}
 
 export function MemoryPanel() {
-  const [store, setStore] = useState({ notes: [], totalChars: 0 })
+  const [store, setStore] = useState<MemoryStore>({ notes: [], totalChars: 0 })
   const [adding, setAdding] = useState(false)
   const [newNote, setNewNote] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState(null) // null = not searching
+  const [searchResults, setSearchResults] = useState<MemoryNote[] | null>(null)
 
-  const fetchMemory = useCallback(async () => {
+  const fetchMemory = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch('/api/memory')
-      if (res.ok) setStore(await res.json())
-    } catch {}
+      if (res.ok) setStore((await res.json()) as MemoryStore)
+    } catch {
+      // silent — panel is non-critical
+    }
   }, [])
 
   useEffect(() => {
-    fetchMemory()
+    void fetchMemory()
     window.addEventListener('memory:updated', fetchMemory)
     return () => window.removeEventListener('memory:updated', fetchMemory)
   }, [fetchMemory])
 
-  // Debounced semantic search
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchResults(null); return }
     const timer = setTimeout(async () => {
@@ -35,23 +41,25 @@ export function MemoryPanel() {
           body: JSON.stringify({ query: searchQuery }),
         })
         if (res.ok) {
-          const { results } = await res.json()
+          const { results } = (await res.json()) as { results: MemoryNote[] }
           setSearchResults(results)
         }
-      } catch {}
+      } catch {
+        // silent
+      }
     }, 400)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string): Promise<void> => {
     await fetch(`/api/memory/notes/${id}`, { method: 'DELETE' })
-    fetchMemory()
+    void fetchMemory()
     if (searchResults) {
-      setSearchResults(prev => prev.filter(n => n.id !== id))
+      setSearchResults(prev => prev?.filter(n => n.id !== id) ?? null)
     }
   }
 
-  const handleAdd = async () => {
+  const handleAdd = async (): Promise<void> => {
     if (!newNote.trim()) return
     await fetch('/api/memory/notes', {
       method: 'POST',
@@ -60,7 +68,7 @@ export function MemoryPanel() {
     })
     setNewNote('')
     setAdding(false)
-    fetchMemory()
+    void fetchMemory()
   }
 
   const displayNotes = searchResults ?? store.notes
@@ -76,7 +84,6 @@ export function MemoryPanel() {
         </span>
       </div>
 
-      {/* Budget progress bar */}
       <div className={styles.budgetBar}>
         <div
           className={`${styles.budgetFill} ${isWarning ? styles.budgetWarn : ''}`}
@@ -87,7 +94,6 @@ export function MemoryPanel() {
         <p className={styles.warnText}>记忆接近上限，旧条目将被自动淘汰</p>
       )}
 
-      {/* Search */}
       <input
         className={styles.searchInput}
         placeholder="语义搜索记忆..."
@@ -95,7 +101,6 @@ export function MemoryPanel() {
         onChange={e => setSearchQuery(e.target.value)}
       />
 
-      {/* Notes list */}
       <div className={styles.noteList}>
         {displayNotes.length === 0 ? (
           <p className={styles.empty}>
@@ -110,7 +115,7 @@ export function MemoryPanel() {
               </span>
               <button
                 className={styles.deleteBtn}
-                onClick={() => handleDelete(note.id)}
+                onClick={() => void handleDelete(note.id)}
                 title="删除"
               >
                 ×
@@ -120,7 +125,6 @@ export function MemoryPanel() {
         )}
       </div>
 
-      {/* Add note */}
       {adding ? (
         <div className={styles.addForm}>
           <input
@@ -131,13 +135,17 @@ export function MemoryPanel() {
             maxLength={200}
             autoFocus
             onKeyDown={e => {
-              if (e.key === 'Enter') handleAdd()
+              if (e.key === 'Enter') void handleAdd()
               if (e.key === 'Escape') setAdding(false)
             }}
           />
           <div className={styles.addActions}>
-            <button className={styles.cancelBtn} onClick={() => setAdding(false)}>取消</button>
-            <button className={styles.confirmBtn} onClick={handleAdd}>保存</button>
+            <button className={styles.cancelBtn} onClick={() => setAdding(false)}>
+              取消
+            </button>
+            <button className={styles.confirmBtn} onClick={() => void handleAdd()}>
+              保存
+            </button>
           </div>
         </div>
       ) : (

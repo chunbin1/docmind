@@ -1,0 +1,110 @@
+// packages/server/src/llm.ts
+import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
+import type { LLMProvider, StreamChatOptions } from './types.js'
+
+function detectProvider(): LLMProvider {
+  const explicit = process.env.LLM_PROVIDER?.toLowerCase()
+  if (explicit === 'anthropic' || explicit === 'zhipu') return explicit
+  if (process.env.ANTHROPIC_API_KEY) return 'anthropic'
+  if (process.env.ZHIPU_API_KEY) return 'zhipu'
+  throw new Error('No LLM provider configured. Set ANTHROPIC_API_KEY or ZHIPU_API_KEY in .env')
+}
+
+export const PROVIDER: LLMProvider = detectProvider()
+
+async function* streamAnthropic({
+  messages,
+  system,
+  maxTokens = 2048,
+}: StreamChatOptions): AsyncGenerator<string> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+  const stream = await client.messages.stream({
+    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+    max_tokens: maxTokens,
+    system,
+    messages: messages.map(({ role, content }) => ({ role, content })),
+  })
+
+  for await (const chunk of stream) {
+    if (
+      chunk.type === 'content_block_delta' &&
+      chunk.delta.type === 'text_delta'
+    ) {
+      yield chunk.delta.text
+    }
+  }
+}
+
+function getZhipuModels(): string[] {
+  const raw = process.env.ZHIPU_MODEL ?? 'glm-4-flash'
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+function isQuotaError(err: unknown): boolean {
+  const e = err as {
+    status?: number
+    code?: number | string
+    message?: string
+    error?: { code?: number | string; message?: string }
+  }
+  const code = e?.status ?? e?.code ?? e?.error?.code
+  const msg = (e?.message ?? e?.error?.message ?? '').toLowerCase()
+  return (
+    code === 429 ||
+    msg.includes('quota') ||
+    msg.includes('insufficient') ||
+    msg.includes('billing')
+  )
+}
+
+type OpenAIRole = 'system' | 'user' | 'assistant'
+
+async function* streamZhipu({
+  messages,
+  system,
+  maxTokens = 2048,
+}: StreamChatOptions): AsyncGenerator<string> {
+  const client = new OpenAI({
+    apiKey: process.env.ZHIPU_API_KEY,
+    baseURL: 'https://open.bigmodel.cn/api/paas/v4/',
+  })
+
+  const chat: { role: OpenAIRole; content: string }[] = system
+    ? [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role as OpenAIRole, content: m.content }))]
+    : messages.map(m => ({ role: m.role as OpenAIRole, content: m.content }))
+
+  const models = getZhipuModels()
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i]
+    try {
+      const stream = await client.chat.completions.create({
+        model,
+        max_tokens: maxTokens,
+        stream: true,
+        messages: chat,
+      })
+
+      for await (const chunk of stream) {
+        const text = chunk.choices[0]?.delta?.content
+        if (text) yield text
+      }
+      return
+    } catch (err) {
+      const hasNext = i < models.length - 1
+      if (isQuotaError(err) && hasNext) {
+        console.warn(`[llm] model "${model}" quota exhausted, switching to "${models[i + 1]}"`)
+        continue
+      }
+      throw err
+    }
+  }
+}
+
+export function streamChat(opts: StreamChatOptions): AsyncGenerator<string> {
+  if (PROVIDER === 'anthropic') return streamAnthropic(opts)
+  if (PROVIDER === 'zhipu') return streamZhipu(opts)
+  throw new Error(`Unknown provider: ${PROVIDER}`)
+}
