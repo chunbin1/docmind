@@ -6,6 +6,8 @@ packages/client/dist/
 chroma_data/
 uploads/
 .claude/settings.local.json
+.claude/worktrees/
+.claire/
 packages/server/data/memory.db
 packages/server/data/memory.db-shm
 packages/server/data/memory.db-wal
