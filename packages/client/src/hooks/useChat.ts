@@ -129,6 +129,7 @@ export function useChat(): UseChatReturn {
   const sendMessage = useCallback(async (
     message: string,
     systemPrompt?: string,
+    docIds: string[] = [],
   ): Promise<void> => {
     if (!message.trim() || streaming) return
 
@@ -164,6 +165,7 @@ export function useChat(): UseChatReturn {
           message,
           history: chatHistory,
           systemPrompt: finalSystemPrompt,
+          docIds,
         }),
         signal: controller.signal,
       })

@@ -34,7 +34,7 @@ export interface UseChatReturn {
   messages: ChatMessage[]
   streaming: boolean
   compacting: boolean
-  sendMessage: (message: string, systemPrompt?: string) => Promise<void>
+  sendMessage: (message: string, systemPrompt?: string, docIds?: string[]) => Promise<void>
   stopStreaming: () => void
   clearMessages: () => void
   togglePin: (index: number) => void
