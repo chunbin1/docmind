@@ -8,6 +8,7 @@ import {
   insertResult,
   getCasesByTestSet,
   getTestSet,
+  getRun,
 } from './evalStore.js'
 import {
   scoreContextRecall,
@@ -135,7 +136,8 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
       avg_faithfulness: totals.faithfulness / n,
       avg_answer_relevancy: totals.answer_relevancy / n,
     })
-    return { ...run, status: 'done' }
+    // Re-read so the response includes finished_at and the averages
+    return getRun(run.id) ?? { ...run, status: 'done' }
   } catch (err) {
     markRunFailed(run.id)
     throw err
