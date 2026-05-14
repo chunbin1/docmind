@@ -49,3 +49,59 @@ export interface DocumentChunk {
   content: string
   distance: number
 }
+
+// === Evaluation types ===
+
+export type EvalDifficulty = 'easy' | 'medium' | 'hard'
+export type EvalRunStatus = 'running' | 'done' | 'failed'
+
+export interface EvalTestSet {
+  id: string
+  doc_id: string
+  name: string
+  case_count: number
+  created_at: string
+}
+
+export interface EvalCase {
+  id: string
+  test_set_id: string
+  question: string
+  expected_answer: string
+  ground_truth_chunk_id: string
+  difficulty: EvalDifficulty
+}
+
+export interface EvalConfigSnapshot {
+  chunkSize: number
+  overlap: number
+  topK: number
+  model: string
+  embedModel: string
+}
+
+export interface EvalRun {
+  id: string
+  test_set_id: string
+  config_snapshot: string  // JSON string of EvalConfigSnapshot
+  status: EvalRunStatus
+  started_at: string
+  finished_at: string | null
+  avg_context_recall: number | null
+  avg_context_precision: number | null
+  avg_faithfulness: number | null
+  avg_answer_relevancy: number | null
+}
+
+export interface EvalResult {
+  id: string
+  run_id: string
+  case_id: string
+  retrieved_chunk_ids: string  // JSON array of strings
+  generated_answer: string
+  context_recall: number | null
+  context_precision: number | null
+  faithfulness: number | null
+  answer_relevancy: number | null
+  judge_reasoning: string | null  // JSON string with reasoning per dimension
+}
