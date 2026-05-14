@@ -2,7 +2,10 @@
 import OpenAI from 'openai'
 import type { DocumentChunk } from '../types.js'
 
-const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
+// Judge uses a separate (more capable) model — independent of ZHIPU_MODEL,
+// so the system being evaluated can stay on a cheaper model while scoring
+// stays accurate.
+const MODEL = process.env.ZHIPU_JUDGE_MODEL ?? 'glm-4.7'
 
 function getClient(): OpenAI {
   return new OpenAI({

@@ -84,8 +84,9 @@ export interface EvalConfigSnapshot {
   chunkSize: number
   overlap: number
   topK: number
-  model: string
+  model: string         // model used in the RAG pipeline (answer generation)
   embedModel: string
+  judgeModel: string    // model used by LLM-as-Judge for scoring (defaults to glm-4.7)
 }
 
 export interface EvalRun {

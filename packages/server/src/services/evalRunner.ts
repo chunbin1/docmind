@@ -20,6 +20,7 @@ import type { EvalRun, EvalConfigSnapshot } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
 const EMBED_MODEL = process.env.ZHIPU_EMBEDDING_MODEL ?? 'embedding-3'
+const JUDGE_MODEL = process.env.ZHIPU_JUDGE_MODEL ?? 'glm-4.7'
 const TOP_K = 3
 
 function getClient(): OpenAI {
@@ -76,6 +77,7 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
     topK: TOP_K,
     model: MODEL,
     embedModel: EMBED_MODEL,
+    judgeModel: JUDGE_MODEL,
   }
   const run = createRun({
     test_set_id: testSetId,
