@@ -105,3 +105,33 @@ export async function deleteByDocId(docId: string): Promise<void> {
     console.warn(`[documentVector] deleteByDocId failed: ${msg}`)
   }
 }
+
+/**
+ * 取出某文档的所有 chunk（按 chunk_index 排序），用于评估场景遍历所有块。
+ */
+export async function getAllChunksByDoc(docId: string): Promise<Array<{
+  id: string
+  chunk_index: number
+  content: string
+}>> {
+  if (!_available || !_collection) return []
+  try {
+    const results = await _collection.get({
+      where: { doc_id: { $eq: docId } },
+      include: ['documents', 'metadatas'],
+    })
+    const ids = results.ids ?? []
+    const documents = results.documents ?? []
+    const metadatas = results.metadatas ?? []
+    const chunks = ids.map((id, i) => ({
+      id,
+      chunk_index: Number((metadatas[i] as Record<string, unknown>)?.chunk_index ?? 0),
+      content: documents[i] ?? '',
+    }))
+    return chunks.sort((a, b) => a.chunk_index - b.chunk_index)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[documentVector] getAllChunksByDoc failed: ${msg}`)
+    return []
+  }
+}
