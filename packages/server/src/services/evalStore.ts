@@ -107,16 +107,19 @@ export function insertCases(testSetId: string, cases: Array<{
   ground_truth_chunk_id: string
   difficulty: 'easy' | 'medium' | 'hard'
 }>): EvalCase[] {
-  const inserted: EvalCase[] = []
   const stmt = db().prepare(
     'INSERT INTO eval_cases (id, test_set_id, question, expected_answer, ground_truth_chunk_id, difficulty) VALUES (?, ?, ?, ?, ?, ?)',
   )
-  for (const c of cases) {
-    const id = genId('case')
-    stmt.run(id, testSetId, c.question, c.expected_answer, c.ground_truth_chunk_id, c.difficulty)
-    inserted.push({ id, test_set_id: testSetId, ...c })
-  }
-  return inserted
+  const insertAll = db().transaction((items: typeof cases): EvalCase[] => {
+    const inserted: EvalCase[] = []
+    for (const c of items) {
+      const id = genId('case')
+      stmt.run(id, testSetId, c.question, c.expected_answer, c.ground_truth_chunk_id, c.difficulty)
+      inserted.push({ id, test_set_id: testSetId, ...c })
+    }
+    return inserted
+  })
+  return insertAll(cases)
 }
 
 export function getCasesByTestSet(testSetId: string): EvalCase[] {
