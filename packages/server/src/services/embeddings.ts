@@ -35,9 +35,19 @@ export async function embed(text: string): Promise<number[]> {
   return result[0]
 }
 
+// Zhipu's embedding API caps input arrays at 64 items per request.
+const ZHIPU_BATCH_LIMIT = 64
+
 export async function embedBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return []
-  return callEmbeddingAPI(texts)
+  if (texts.length <= ZHIPU_BATCH_LIMIT) return callEmbeddingAPI(texts)
+  const results: number[][] = []
+  for (let i = 0; i < texts.length; i += ZHIPU_BATCH_LIMIT) {
+    const slice = texts.slice(i, i + ZHIPU_BATCH_LIMIT)
+    const part = await callEmbeddingAPI(slice)
+    results.push(...part)
+  }
+  return results
 }
 
 export class ZhipuEmbeddingFunction implements EmbeddingFunction {
