@@ -50,7 +50,15 @@ export interface DocumentChunk {
   distance: number
 }
 
-// === Evaluation types ===
+// =============================================================================
+// Evaluation types
+//
+// Domain types for the RAG evaluation module. Interface fields mirror SQLite
+// row shapes (snake_case). EvalConfigSnapshot is the deserialized form of
+// EvalRun.config_snapshot — stored as a JSON string in the row, parsed at the
+// service layer; its keys use camelCase because it represents a logical config
+// object, not a DB row.
+// =============================================================================
 
 export type EvalDifficulty = 'easy' | 'medium' | 'hard'
 export type EvalRunStatus = 'running' | 'done' | 'failed'
@@ -59,7 +67,7 @@ export interface EvalTestSet {
   id: string
   doc_id: string
   name: string
-  case_count: number
+  case_count: number  // denormalized count of related eval_cases rows
   created_at: string
 }
 
@@ -103,5 +111,5 @@ export interface EvalResult {
   context_precision: number | null
   faithfulness: number | null
   answer_relevancy: number | null
-  judge_reasoning: string | null  // JSON string with reasoning per dimension
+  judge_reasoning: string | null  // JSON: { precision: string, faithfulness: string, relevancy: string }
 }
