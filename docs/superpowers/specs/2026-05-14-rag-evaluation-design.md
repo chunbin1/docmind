@@ -47,52 +47,52 @@
 ```sql
 -- 测试集（一个文档可以有多个版本的测试集）
 CREATE TABLE eval_test_sets (
-  id            TEXT PRIMARY KEY,
-  doc_id        TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  case_count    INTEGER NOT NULL,
-  created_at    TEXT NOT NULL
+  id            TEXT PRIMARY KEY,           -- 测试集唯一 ID，格式: ts_<timestamp>_<random>
+  doc_id        TEXT NOT NULL,              -- 关联的文档 ID，对应 documents.id
+  name          TEXT NOT NULL,              -- 测试集名称，默认 "<文件名>-v<N>"
+  case_count    INTEGER NOT NULL,           -- 该测试集包含的 case 总数（冗余字段，避免 count 查询）
+  created_at    TEXT NOT NULL               -- 创建时间，ISO 8601 格式
 );
 
 -- 测试用例（每个 case = 一个问答对）
 CREATE TABLE eval_cases (
-  id                     TEXT PRIMARY KEY,
-  test_set_id            TEXT NOT NULL,
-  question               TEXT NOT NULL,
-  expected_answer        TEXT NOT NULL,
-  ground_truth_chunk_id  TEXT NOT NULL,   -- 答案应该来自哪个 chunk
-  difficulty             TEXT NOT NULL,   -- easy | medium | hard
+  id                     TEXT PRIMARY KEY,  -- 用例唯一 ID，格式: case_<timestamp>_<random>
+  test_set_id            TEXT NOT NULL,     -- 所属测试集 ID，对应 eval_test_sets.id
+  question               TEXT NOT NULL,     -- LLM 生成的问题文本
+  expected_answer        TEXT NOT NULL,     -- LLM 生成的标准答案文本（来自原 chunk）
+  ground_truth_chunk_id  TEXT NOT NULL,     -- 答案应该来自哪个 chunk，对应 ChromaDB 里的 chunk_id（如 doc_xxx_chunk_12）
+  difficulty             TEXT NOT NULL,     -- 问题难度: easy（直接事实）| medium（需理解）| hard（多概念关联）
   FOREIGN KEY (test_set_id) REFERENCES eval_test_sets(id) ON DELETE CASCADE
 );
 
 -- 评估运行（每次跑一遍是一个 run）
 CREATE TABLE eval_runs (
-  id                       TEXT PRIMARY KEY,
-  test_set_id              TEXT NOT NULL,
-  config_snapshot          TEXT NOT NULL,   -- JSON: 分块、topK、模型等
-  status                   TEXT NOT NULL,   -- running | done | failed
-  started_at               TEXT NOT NULL,
-  finished_at              TEXT,
-  -- 聚合指标（finished 后填充）
-  avg_context_recall       REAL,
-  avg_context_precision    REAL,
-  avg_faithfulness         REAL,
-  avg_answer_relevancy     REAL,
+  id                       TEXT PRIMARY KEY, -- 运行唯一 ID，格式: run_<timestamp>_<random>
+  test_set_id              TEXT NOT NULL,    -- 所基于的测试集 ID，对应 eval_test_sets.id
+  config_snapshot          TEXT NOT NULL,    -- 评估时的配置快照，JSON 格式: { chunkSize, overlap, topK, model, embedModel }
+  status                   TEXT NOT NULL,    -- 运行状态: running（进行中）| done（完成）| failed（失败）
+  started_at               TEXT NOT NULL,    -- 开始时间，ISO 8601 格式
+  finished_at              TEXT,             -- 结束时间，ISO 8601 格式；running 状态下为 NULL
+  -- 聚合指标（status=done 后填充，failed/running 时为 NULL）
+  avg_context_recall       REAL,             -- 平均检索召回率 (0-1)：所有 case 是否检索到了 ground_truth_chunk
+  avg_context_precision    REAL,             -- 平均检索精确率 (0-1)：检索到的 chunk 里有多少真正相关
+  avg_faithfulness         REAL,             -- 平均答案忠实度 (0-1)：回答是否基于检索内容，没有编造
+  avg_answer_relevancy     REAL,             -- 平均答案相关性 (0-1)：回答是否切题、与期望一致
   FOREIGN KEY (test_set_id) REFERENCES eval_test_sets(id)
 );
 
--- 单条结果
+-- 单条结果（一个 run × 一个 case = 一条 result）
 CREATE TABLE eval_results (
-  id                    TEXT PRIMARY KEY,
-  run_id                TEXT NOT NULL,
-  case_id               TEXT NOT NULL,
-  retrieved_chunk_ids   TEXT NOT NULL,   -- JSON 数组
-  generated_answer      TEXT NOT NULL,
-  context_recall        REAL,
-  context_precision     REAL,
-  faithfulness          REAL,
-  answer_relevancy      REAL,
-  judge_reasoning       TEXT,            -- LLM judge 的理由（便于排查）
+  id                    TEXT PRIMARY KEY,    -- 结果唯一 ID，格式: res_<timestamp>_<random>
+  run_id                TEXT NOT NULL,       -- 所属运行 ID，对应 eval_runs.id
+  case_id               TEXT NOT NULL,       -- 对应的测试用例 ID，对应 eval_cases.id
+  retrieved_chunk_ids   TEXT NOT NULL,       -- 实际检索到的 chunk ID 列表，JSON 数组（如 ["doc_xxx_chunk_3","doc_xxx_chunk_7"]）
+  generated_answer      TEXT NOT NULL,       -- pipeline 生成的实际回答
+  context_recall        REAL,                -- 检索召回率 (0 或 1)：retrieved 是否包含 ground_truth_chunk
+  context_precision     REAL,                -- 检索精确率 (0-1)：LLM judge 评分
+  faithfulness          REAL,                -- 答案忠实度 (0-1)：LLM judge 评分
+  answer_relevancy      REAL,                -- 答案相关性 (0-1)：LLM judge 评分
+  judge_reasoning       TEXT,                -- LLM judge 的评分理由，便于排查；JSON 格式聚合 4 个维度的 reasoning
   FOREIGN KEY (run_id) REFERENCES eval_runs(id) ON DELETE CASCADE
 );
 ```
