@@ -15,9 +15,20 @@ import { runEvaluation } from '../services/evalRunner.js'
 interface GenerateBody { docId: string }
 interface RunBody { testSetId: string }
 
+// Eval uses Zhipu's OpenAI-compatible API (for generation and judging). It cannot
+// fall back to Anthropic because the model + endpoint are hardcoded throughout the
+// eval services. Surface a clear 503 instead of letting the OpenAI client fail
+// with an unauthenticated error.
+function requireZhipu(reply: import('fastify').FastifyReply): boolean {
+  if (process.env.ZHIPU_API_KEY) return true
+  void reply.code(503).send({ error: 'Eval requires ZHIPU_API_KEY' })
+  return false
+}
+
 export const evalRoutes: FastifyPluginAsync = async (app) => {
   // 生成测试集（阻塞式，可能耗时 30s+）
   app.post<{ Body: GenerateBody }>('/eval/generate', async (req, reply) => {
+    if (!requireZhipu(reply)) return
     const { docId } = req.body
     if (!docId) return reply.code(400).send({ error: 'docId required' })
     try {
@@ -50,6 +61,7 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 触发一次评估（阻塞式，可能耗时几分钟）
   app.post<{ Body: RunBody }>('/eval/runs', async (req, reply) => {
+    if (!requireZhipu(reply)) return
     const { testSetId } = req.body
     if (!testSetId) return reply.code(400).send({ error: 'testSetId required' })
     try {

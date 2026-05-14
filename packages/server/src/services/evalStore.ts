@@ -42,7 +42,7 @@ export function initEvalTables(db: DB): void {
       avg_context_precision    REAL,
       avg_faithfulness         REAL,
       avg_answer_relevancy     REAL,
-      FOREIGN KEY (test_set_id) REFERENCES eval_test_sets(id)
+      FOREIGN KEY (test_set_id) REFERENCES eval_test_sets(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS eval_results (
@@ -59,6 +59,13 @@ export function initEvalTables(db: DB): void {
       FOREIGN KEY (run_id) REFERENCES eval_runs(id) ON DELETE CASCADE
     );
   `)
+  // Mark any runs left in 'running' state from a previous server lifetime as failed,
+  // so they don't get stuck forever (the in-process loop that owned them is gone).
+  db.prepare(`
+    UPDATE eval_runs
+    SET status = 'failed', finished_at = ?
+    WHERE status = 'running'
+  `).run(new Date().toISOString())
 }
 
 function db(): DB {
