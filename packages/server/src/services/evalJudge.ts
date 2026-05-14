@@ -29,19 +29,39 @@ function parseScoreJSON(raw: string): { score: number; reasoning: string } {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function isRateLimit(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('429') || /rate.?limit/i.test(msg) || msg.includes('速率限制')
+}
+
+const MAX_RETRIES = 5
+
 async function callJudge(prompt: string): Promise<{ score: number; reasoning: string }> {
-  try {
-    const completion = await getClient().chat.completions.create({
-      model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-    })
-    const raw = completion.choices[0]?.message?.content ?? ''
-    return parseScoreJSON(raw)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { score: 0, reasoning: `judge call failed: ${msg}` }
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const completion = await getClient().chat.completions.create({
+        model: MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0,
+      })
+      const raw = completion.choices[0]?.message?.content ?? ''
+      return parseScoreJSON(raw)
+    } catch (err) {
+      lastErr = err
+      if (!isRateLimit(err) || attempt === MAX_RETRIES) break
+      // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s
+      const base = 2000 * Math.pow(2, attempt)
+      const wait = base + Math.floor(Math.random() * 1000)
+      await sleep(wait)
+    }
   }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr)
+  return { score: 0, reasoning: `judge call failed: ${msg}` }
 }
 
 /**
