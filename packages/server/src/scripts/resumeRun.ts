@@ -3,6 +3,8 @@
 // Usage: tsx src/scripts/resumeRun.ts <runId>
 import 'dotenv/config'
 import { initDb } from '../services/memoryStore.js'
+import { initDocumentTables } from '../services/documentStore.js'
+import { initEvalTables } from '../services/evalStore.js'
 import { initDocCollection } from '../services/documentVector.js'
 import { resumeEvaluation } from '../services/evalRunner.js'
 
@@ -12,7 +14,9 @@ if (!runId) {
   process.exit(1)
 }
 
-initDb()
+const sqliteDb = initDb()
+initDocumentTables(sqliteDb)
+initEvalTables(sqliteDb)
 await initDocCollection()
 
 console.log(`[resume] resuming run ${runId} ...`)
