@@ -100,6 +100,7 @@ export interface EvalRun {
   avg_context_precision: number | null
   avg_faithfulness: number | null
   avg_answer_relevancy: number | null
+  total_tokens: number | null  // sum of all LLM token usage in this run (NULL for pre-tracking runs)
 }
 
 export interface EvalResult {
@@ -113,4 +114,7 @@ export interface EvalResult {
   faithfulness: number | null
   answer_relevancy: number | null
   judge_reasoning: string | null  // JSON: { precision: string, faithfulness: string, relevancy: string }
+  prompt_tokens: number | null      // input tokens (answer-gen + judge), NULL for pre-tracking results
+  completion_tokens: number | null  // output tokens
+  total_tokens: number | null       // prompt + completion
 }

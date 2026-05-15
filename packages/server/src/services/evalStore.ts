@@ -10,6 +10,14 @@ import type {
 
 let _db: DB | null = null
 
+/** Add a column if it doesn't already exist (idempotent SQLite migration). */
+function migrateAddColumn(db: DB, table: string, column: string, type: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (!cols.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
+}
+
 export function initEvalTables(db: DB): void {
   _db = db
   db.exec(`
@@ -42,6 +50,7 @@ export function initEvalTables(db: DB): void {
       avg_context_precision    REAL,
       avg_faithfulness         REAL,
       avg_answer_relevancy     REAL,
+      total_tokens             INTEGER,
       FOREIGN KEY (test_set_id) REFERENCES eval_test_sets(id) ON DELETE CASCADE
     );
 
@@ -56,9 +65,19 @@ export function initEvalTables(db: DB): void {
       faithfulness          REAL,
       answer_relevancy      REAL,
       judge_reasoning       TEXT,
+      prompt_tokens         INTEGER,
+      completion_tokens     INTEGER,
+      total_tokens          INTEGER,
       FOREIGN KEY (run_id) REFERENCES eval_runs(id) ON DELETE CASCADE
     );
   `)
+
+  // Migrate older DBs that predate token tracking (CREATE TABLE IF NOT EXISTS
+  // won't add columns to an existing table). New columns default to NULL.
+  migrateAddColumn(db, 'eval_runs', 'total_tokens', 'INTEGER')
+  migrateAddColumn(db, 'eval_results', 'prompt_tokens', 'INTEGER')
+  migrateAddColumn(db, 'eval_results', 'completion_tokens', 'INTEGER')
+  migrateAddColumn(db, 'eval_results', 'total_tokens', 'INTEGER')
   // Mark any runs left in 'running' state from a previous server lifetime as failed,
   // so they don't get stuck forever (the in-process loop that owned them is gone).
   db.prepare(`
@@ -157,6 +176,7 @@ export function createRun(opts: {
     avg_context_precision: null,
     avg_faithfulness: null,
     avg_answer_relevancy: null,
+    total_tokens: null,
   }
 }
 
@@ -166,6 +186,7 @@ export function finishRun(id: string, opts: {
   avg_context_precision: number
   avg_faithfulness: number
   avg_answer_relevancy: number
+  total_tokens: number
 }): void {
   const finished_at = new Date().toISOString()
   db().prepare(`
@@ -175,12 +196,14 @@ export function finishRun(id: string, opts: {
         avg_context_recall = ?,
         avg_context_precision = ?,
         avg_faithfulness = ?,
-        avg_answer_relevancy = ?
+        avg_answer_relevancy = ?,
+        total_tokens = ?
     WHERE id = ?
   `).run(
     opts.status, finished_at,
     opts.avg_context_recall, opts.avg_context_precision,
     opts.avg_faithfulness, opts.avg_answer_relevancy,
+    opts.total_tokens,
     id,
   )
 }
@@ -212,17 +235,22 @@ export function insertResult(opts: {
   faithfulness: number
   answer_relevancy: number
   judge_reasoning: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
 }): EvalResult {
   const id = genId('res')
   db().prepare(`
     INSERT INTO eval_results
     (id, run_id, case_id, retrieved_chunk_ids, generated_answer,
-     context_recall, context_precision, faithfulness, answer_relevancy, judge_reasoning)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     context_recall, context_precision, faithfulness, answer_relevancy, judge_reasoning,
+     prompt_tokens, completion_tokens, total_tokens)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, opts.run_id, opts.case_id, opts.retrieved_chunk_ids, opts.generated_answer,
     opts.context_recall, opts.context_precision, opts.faithfulness, opts.answer_relevancy,
     opts.judge_reasoning,
+    opts.prompt_tokens, opts.completion_tokens, opts.total_tokens,
   )
   return { id, ...opts }
 }

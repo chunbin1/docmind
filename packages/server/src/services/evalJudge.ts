@@ -19,10 +19,23 @@ export interface MetricScore {
   reasoning: string
 }
 
+export interface TokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export const ZERO_USAGE: TokenUsage = {
+  prompt_tokens: 0,
+  completion_tokens: 0,
+  total_tokens: 0,
+}
+
 export interface LLMMetricScores {
   precision: MetricScore
   faithfulness: MetricScore
   relevancy: MetricScore
+  usage: TokenUsage
 }
 
 function clampScore(v: unknown): number {
@@ -51,13 +64,14 @@ function pickMetric(obj: unknown, key: string): MetricScore {
  * metric verdicts. Any parse failure degrades all three to score 0 with the
  * raw text preserved for debugging.
  */
-function parseMergedJSON(raw: string): LLMMetricScores {
+function parseMergedJSON(raw: string, usage: TokenUsage): LLMMetricScores {
   try {
     const parsed = JSON.parse(stripFences(raw))
     return {
       precision: pickMetric(parsed, 'precision'),
       faithfulness: pickMetric(parsed, 'faithfulness'),
       relevancy: pickMetric(parsed, 'relevancy'),
+      usage,
     }
   } catch {
     const reason = `parse failed: ${raw.slice(0, 200)}`
@@ -65,6 +79,7 @@ function parseMergedJSON(raw: string): LLMMetricScores {
       precision: { score: 0, reasoning: reason },
       faithfulness: { score: 0, reasoning: reason },
       relevancy: { score: 0, reasoning: reason },
+      usage,
     }
   }
 }
@@ -95,7 +110,13 @@ async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
         temperature: 0,
       })
       const raw = completion.choices[0]?.message?.content ?? ''
-      return parseMergedJSON(raw)
+      const u = completion.usage
+      const usage: TokenUsage = {
+        prompt_tokens: u?.prompt_tokens ?? 0,
+        completion_tokens: u?.completion_tokens ?? 0,
+        total_tokens: u?.total_tokens ?? 0,
+      }
+      return parseMergedJSON(raw, usage)
     } catch (err) {
       lastErr = err
       if (!isRateLimit(err) || attempt === MAX_RETRIES) break
@@ -111,6 +132,7 @@ async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
     precision: { score: 0, reasoning: msg },
     faithfulness: { score: 0, reasoning: msg },
     relevancy: { score: 0, reasoning: msg },
+    usage: ZERO_USAGE,
   }
 }
 

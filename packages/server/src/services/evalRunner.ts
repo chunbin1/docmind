@@ -12,7 +12,8 @@ import {
   getRun,
   getResultsByRun,
 } from './evalStore.js'
-import { scoreContextRecall, scoreLLMMetrics } from './evalJudge.js'
+import { scoreContextRecall, scoreLLMMetrics, ZERO_USAGE } from './evalJudge.js'
+import type { TokenUsage } from './evalJudge.js'
 import type { EvalRun, EvalConfigSnapshot, EvalCase } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
@@ -33,7 +34,7 @@ function getClient(): OpenAI {
 async function generateAnswer(
   question: string,
   chunks: Array<{ filename: string; chunk_index: number; content: string }>,
-): Promise<string> {
+): Promise<{ answer: string; usage: TokenUsage }> {
   const docSection = chunks.length
     ? `--- 文档参考 ---\n${chunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
     : ''
@@ -51,10 +52,18 @@ async function generateAnswer(
       ],
       temperature: 0.2,
     })
-    return completion.choices[0]?.message?.content ?? ''
+    const u = completion.usage
+    return {
+      answer: completion.choices[0]?.message?.content ?? '',
+      usage: {
+        prompt_tokens: u?.prompt_tokens ?? 0,
+        completion_tokens: u?.completion_tokens ?? 0,
+        total_tokens: u?.total_tokens ?? 0,
+      },
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return `[generation failed: ${msg}]`
+    return { answer: `[generation failed: ${msg}]`, usage: ZERO_USAGE }
   }
 }
 
@@ -64,10 +73,11 @@ async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<
   context_precision: number
   faithfulness: number
   answer_relevancy: number
+  total_tokens: number
 }> {
   const retrievedChunks = await searchChunks(c.question, [docId], TOP_K)
   const retrievedIds = retrievedChunks.map(rc => `${docId}_chunk_${rc.chunk_index}`)
-  const answer = await generateAnswer(c.question, retrievedChunks)
+  const { answer, usage: genUsage } = await generateAnswer(c.question, retrievedChunks)
 
   const recall = scoreContextRecall(
     retrievedIds,
@@ -75,12 +85,17 @@ async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<
     c.expected_answer,
     retrievedChunks.map(rc => rc.content),
   )
-  const { precision, faithfulness, relevancy } = await scoreLLMMetrics(
+  const { precision, faithfulness, relevancy, usage: judgeUsage } = await scoreLLMMetrics(
     c.question,
     retrievedChunks,
     answer,
     c.expected_answer,
   )
+
+  // Per-case token usage = answer generation + judge call
+  const prompt_tokens = genUsage.prompt_tokens + judgeUsage.prompt_tokens
+  const completion_tokens = genUsage.completion_tokens + judgeUsage.completion_tokens
+  const total_tokens = genUsage.total_tokens + judgeUsage.total_tokens
 
   insertResult({
     run_id: runId,
@@ -96,6 +111,9 @@ async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<
       faithfulness: faithfulness.reasoning,
       relevancy: relevancy.reasoning,
     }),
+    prompt_tokens,
+    completion_tokens,
+    total_tokens,
   })
 
   return {
@@ -103,6 +121,7 @@ async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<
     context_precision: precision.score,
     faithfulness: faithfulness.score,
     answer_relevancy: relevancy.score,
+    total_tokens,
   }
 }
 
@@ -120,8 +139,9 @@ function recomputeAndFinish(runId: string): EvalRun {
       cp: acc.cp + (r.context_precision ?? 0),
       f: acc.f + (r.faithfulness ?? 0),
       ar: acc.ar + (r.answer_relevancy ?? 0),
+      tok: acc.tok + (r.total_tokens ?? 0),
     }),
-    { cr: 0, cp: 0, f: 0, ar: 0 },
+    { cr: 0, cp: 0, f: 0, ar: 0, tok: 0 },
   )
   finishRun(runId, {
     status: 'done',
@@ -129,6 +149,7 @@ function recomputeAndFinish(runId: string): EvalRun {
     avg_context_precision: sum.cp / n,
     avg_faithfulness: sum.f / n,
     avg_answer_relevancy: sum.ar / n,
+    total_tokens: sum.tok,
   })
   return getRun(runId) as EvalRun
 }
@@ -166,7 +187,8 @@ export async function resumeEvaluation(runId: string): Promise<EvalRun> {
       console.log(
         `[resume] #${i + 1}/${cases.length} 完成 (跳过保留 ${kept}, 已重评 ${done}) ` +
           `用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ${ok ? '✓' : '✗429假0'} ` +
-          `P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} | ${c.question}`,
+          `P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} ` +
+          `tok=${r.total_tokens} | ${c.question}`,
       )
     }
     return recomputeAndFinish(runId)
@@ -209,7 +231,8 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
       const ok = r.context_precision > 0 || r.faithfulness > 0 || r.answer_relevancy > 0
       console.log(
         `[eval] #${i + 1}/${cases.length} 完成 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ` +
-          `${ok ? '✓' : '✗429假0'} P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} | ${c.question}`,
+          `${ok ? '✓' : '✗429假0'} P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} ` +
+          `tok=${r.total_tokens} | ${c.question}`,
       )
     }
     return recomputeAndFinish(run.id)
