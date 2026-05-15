@@ -233,6 +233,13 @@ export function getResultsByRun(runId: string): EvalResult[] {
     .all(runId) as EvalResult[]
 }
 
+/** Delete a single result (used when re-running a failed case during resume). */
+export function deleteResult(runId: string, caseId: string): void {
+  db()
+    .prepare('DELETE FROM eval_results WHERE run_id = ? AND case_id = ?')
+    .run(runId, caseId)
+}
+
 /**
  * Results joined with their source case so the UI can show the question and
  * expected answer alongside the generated answer and scores.

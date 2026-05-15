@@ -10,7 +10,7 @@ import {
   getResultsWithCaseByRun,
 } from '../services/evalStore.js'
 import { generateTestSet } from '../services/evalGenerator.js'
-import { runEvaluation } from '../services/evalRunner.js'
+import { runEvaluation, resumeEvaluation } from '../services/evalRunner.js'
 
 interface GenerateBody { docId: string }
 interface RunBody { testSetId: string }
@@ -66,6 +66,18 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
     if (!testSetId) return reply.code(400).send({ error: 'testSetId required' })
     try {
       const run = await runEvaluation(testSetId)
+      return run
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return reply.code(500).send({ error: msg })
+    }
+  })
+
+  // 续跑：保留已成功的 case，只重跑失败/未评的（阻塞式）
+  app.post<{ Params: { id: string } }>('/eval/runs/:id/resume', async (req, reply) => {
+    if (!requireZhipu(reply)) return
+    try {
+      const run = await resumeEvaluation(req.params.id)
       return run
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

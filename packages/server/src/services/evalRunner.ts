@@ -6,12 +6,14 @@ import {
   finishRun,
   markRunFailed,
   insertResult,
+  deleteResult,
   getCasesByTestSet,
   getTestSet,
   getRun,
+  getResultsByRun,
 } from './evalStore.js'
 import { scoreContextRecall, scoreLLMMetrics } from './evalJudge.js'
-import type { EvalRun, EvalConfigSnapshot } from '../types.js'
+import type { EvalRun, EvalConfigSnapshot, EvalCase } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
 const EMBED_MODEL = process.env.ZHIPU_EMBEDDING_MODEL ?? 'embedding-3'
@@ -56,6 +58,108 @@ async function generateAnswer(
   }
 }
 
+/** 评估单个 case：检索 → 生成答案 → 4 指标评分 → 写入 eval_results */
+async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<{
+  context_recall: number
+  context_precision: number
+  faithfulness: number
+  answer_relevancy: number
+}> {
+  const retrievedChunks = await searchChunks(c.question, [docId], TOP_K)
+  const retrievedIds = retrievedChunks.map(rc => `${docId}_chunk_${rc.chunk_index}`)
+  const answer = await generateAnswer(c.question, retrievedChunks)
+
+  const recall = scoreContextRecall(
+    retrievedIds,
+    c.ground_truth_chunk_id,
+    c.expected_answer,
+    retrievedChunks.map(rc => rc.content),
+  )
+  const { precision, faithfulness, relevancy } = await scoreLLMMetrics(
+    c.question,
+    retrievedChunks,
+    answer,
+    c.expected_answer,
+  )
+
+  insertResult({
+    run_id: runId,
+    case_id: c.id,
+    retrieved_chunk_ids: JSON.stringify(retrievedIds),
+    generated_answer: answer,
+    context_recall: recall,
+    context_precision: precision.score,
+    faithfulness: faithfulness.score,
+    answer_relevancy: relevancy.score,
+    judge_reasoning: JSON.stringify({
+      precision: precision.reasoning,
+      faithfulness: faithfulness.reasoning,
+      relevancy: relevancy.reasoning,
+    }),
+  })
+
+  return {
+    context_recall: recall,
+    context_precision: precision.score,
+    faithfulness: faithfulness.score,
+    answer_relevancy: relevancy.score,
+  }
+}
+
+/** A result counts as "good" (skippable on resume) if no metric hit a 429/judge failure. */
+function isGoodResult(judgeReasoning: string | null): boolean {
+  return !!judgeReasoning && !judgeReasoning.includes('judge call failed')
+}
+
+function recomputeAndFinish(runId: string): EvalRun {
+  const all = getResultsByRun(runId)
+  const n = Math.max(1, all.length)
+  const sum = all.reduce(
+    (acc, r) => ({
+      cr: acc.cr + (r.context_recall ?? 0),
+      cp: acc.cp + (r.context_precision ?? 0),
+      f: acc.f + (r.faithfulness ?? 0),
+      ar: acc.ar + (r.answer_relevancy ?? 0),
+    }),
+    { cr: 0, cp: 0, f: 0, ar: 0 },
+  )
+  finishRun(runId, {
+    status: 'done',
+    avg_context_recall: sum.cr / n,
+    avg_context_precision: sum.cp / n,
+    avg_faithfulness: sum.f / n,
+    avg_answer_relevancy: sum.ar / n,
+  })
+  return getRun(runId) as EvalRun
+}
+
+/**
+ * 续跑：保留已成功的 case，只重跑失败（429）或从未评过的 case。
+ * 用于上次因限流中断的 run 恢复。
+ */
+export async function resumeEvaluation(runId: string): Promise<EvalRun> {
+  const run = getRun(runId)
+  if (!run) throw new Error(`run not found: ${runId}`)
+  const testSet = getTestSet(run.test_set_id)
+  if (!testSet) throw new Error(`test set not found: ${run.test_set_id}`)
+
+  const cases = getCasesByTestSet(run.test_set_id)
+  const existing = new Map(getResultsByRun(runId).map(r => [r.case_id, r]))
+
+  try {
+    for (const c of cases) {
+      const prev = existing.get(c.id)
+      if (prev && isGoodResult(prev.judge_reasoning)) continue // 保留好结果
+      if (prev) deleteResult(runId, c.id) // 删掉旧的失败结果，重评
+      await evaluateCase(runId, testSet.doc_id, c)
+    }
+    return recomputeAndFinish(runId)
+  } catch (err) {
+    markRunFailed(runId)
+    throw err
+  }
+}
+
 /**
  * 跑一次完整评估：testSetId → 创建 run → 逐 case 评分 → 聚合 → 完成
  */
@@ -79,70 +183,11 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
     config_snapshot: JSON.stringify(config),
   })
 
-  const totals = {
-    context_recall: 0,
-    context_precision: 0,
-    faithfulness: 0,
-    answer_relevancy: 0,
-    count: 0,
-  }
-
   try {
     for (const c of cases) {
-      const retrievedChunks = await searchChunks(c.question, [testSet.doc_id], TOP_K)
-      const retrievedIds = retrievedChunks.map(rc => `${testSet.doc_id}_chunk_${rc.chunk_index}`)
-      const answer = await generateAnswer(c.question, retrievedChunks)
-
-      const recall = scoreContextRecall(
-        retrievedIds,
-        c.ground_truth_chunk_id,
-        c.expected_answer,
-        retrievedChunks.map(rc => rc.content),
-      )
-      // Single judge call for all 3 LLM metrics — 1/3 the requests, which
-      // largely sidesteps Zhipu rate limits (vs. 3 separate calls per case).
-      const { precision, faithfulness, relevancy } = await scoreLLMMetrics(
-        c.question,
-        retrievedChunks,
-        answer,
-        c.expected_answer,
-      )
-
-      const reasoning = JSON.stringify({
-        precision: precision.reasoning,
-        faithfulness: faithfulness.reasoning,
-        relevancy: relevancy.reasoning,
-      })
-
-      insertResult({
-        run_id: run.id,
-        case_id: c.id,
-        retrieved_chunk_ids: JSON.stringify(retrievedIds),
-        generated_answer: answer,
-        context_recall: recall,
-        context_precision: precision.score,
-        faithfulness: faithfulness.score,
-        answer_relevancy: relevancy.score,
-        judge_reasoning: reasoning,
-      })
-
-      totals.context_recall += recall
-      totals.context_precision += precision.score
-      totals.faithfulness += faithfulness.score
-      totals.answer_relevancy += relevancy.score
-      totals.count += 1
+      await evaluateCase(run.id, testSet.doc_id, c)
     }
-
-    const n = Math.max(1, totals.count)
-    finishRun(run.id, {
-      status: 'done',
-      avg_context_recall: totals.context_recall / n,
-      avg_context_precision: totals.context_precision / n,
-      avg_faithfulness: totals.faithfulness / n,
-      avg_answer_relevancy: totals.answer_relevancy / n,
-    })
-    // Re-read so the response includes finished_at and the averages
-    return getRun(run.id) ?? { ...run, status: 'done' }
+    return recomputeAndFinish(run.id)
   } catch (err) {
     markRunFailed(run.id)
     throw err
