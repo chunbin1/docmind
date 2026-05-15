@@ -1,6 +1,7 @@
 // packages/server/src/services/evalJudge.ts
 import OpenAI from 'openai'
 import type { DocumentChunk } from '../types.js'
+import { throttledCompletion, isRateLimit } from './llmThrottle.js'
 
 // Judge uses a separate (more capable) model — independent of ZHIPU_MODEL,
 // so the system being evaluated can stay on a cheaper model while scoring
@@ -88,11 +89,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function isRateLimit(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes('429') || /rate.?limit/i.test(msg) || msg.includes('速率限制')
-}
-
 const MAX_RETRIES = 5
 
 /**
@@ -104,11 +100,13 @@ async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
   let lastErr: unknown
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const completion = await getClient().chat.completions.create({
-        model: MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0,
-      })
+      const completion = await throttledCompletion(() =>
+        getClient().chat.completions.create({
+          model: MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0,
+        }),
+      )
       const raw = completion.choices[0]?.message?.content ?? ''
       const u = completion.usage
       const usage: TokenUsage = {

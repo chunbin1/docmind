@@ -14,6 +14,7 @@ import {
 } from './evalStore.js'
 import { scoreContextRecall, scoreLLMMetrics, ZERO_USAGE } from './evalJudge.js'
 import type { TokenUsage } from './evalJudge.js'
+import { throttledCompletion } from './llmThrottle.js'
 import type { EvalRun, EvalConfigSnapshot, EvalCase } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
@@ -44,14 +45,16 @@ async function generateAnswer(
   ].filter(Boolean).join('\n\n')
 
   try {
-    const completion = await getClient().chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: question },
-      ],
-      temperature: 0.2,
-    })
+    const completion = await throttledCompletion(() =>
+      getClient().chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: question },
+        ],
+        temperature: 0.2,
+      }),
+    )
     const u = completion.usage
     return {
       answer: completion.choices[0]?.message?.content ?? '',
