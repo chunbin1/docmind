@@ -14,18 +14,58 @@ function getClient(): OpenAI {
   })
 }
 
-function parseScoreJSON(raw: string): { score: number; reasoning: string } {
-  const cleaned = raw
+export interface MetricScore {
+  score: number
+  reasoning: string
+}
+
+export interface LLMMetricScores {
+  precision: MetricScore
+  faithfulness: MetricScore
+  relevancy: MetricScore
+}
+
+function clampScore(v: unknown): number {
+  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : 0
+}
+
+function stripFences(raw: string): string {
+  return raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/```\s*$/i, '')
     .trim()
+}
+
+function pickMetric(obj: unknown, key: string): MetricScore {
+  const m = (obj as Record<string, unknown> | null)?.[key] as
+    | { score?: unknown; reasoning?: unknown }
+    | undefined
+  return {
+    score: clampScore(m?.score),
+    reasoning: typeof m?.reasoning === 'string' ? m.reasoning : '',
+  }
+}
+
+/**
+ * Parse the merged judge response: a single JSON object holding all three
+ * metric verdicts. Any parse failure degrades all three to score 0 with the
+ * raw text preserved for debugging.
+ */
+function parseMergedJSON(raw: string): LLMMetricScores {
   try {
-    const parsed = JSON.parse(cleaned) as { score?: number; reasoning?: string }
-    const score = typeof parsed.score === 'number' ? Math.max(0, Math.min(1, parsed.score)) : 0
-    const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : ''
-    return { score, reasoning }
+    const parsed = JSON.parse(stripFences(raw))
+    return {
+      precision: pickMetric(parsed, 'precision'),
+      faithfulness: pickMetric(parsed, 'faithfulness'),
+      relevancy: pickMetric(parsed, 'relevancy'),
+    }
   } catch {
-    return { score: 0, reasoning: `parse failed: ${raw.slice(0, 200)}` }
+    const reason = `parse failed: ${raw.slice(0, 200)}`
+    return {
+      precision: { score: 0, reasoning: reason },
+      faithfulness: { score: 0, reasoning: reason },
+      relevancy: { score: 0, reasoning: reason },
+    }
   }
 }
 
@@ -40,7 +80,12 @@ function isRateLimit(err: unknown): boolean {
 
 const MAX_RETRIES = 5
 
-async function callJudge(prompt: string): Promise<{ score: number; reasoning: string }> {
+/**
+ * Call the judge model once and parse the merged 3-metric response.
+ * Retries with exponential backoff on rate-limit (429) errors. If it
+ * ultimately fails, all three metrics degrade to 0 with the error text.
+ */
+async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
   let lastErr: unknown
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -50,7 +95,7 @@ async function callJudge(prompt: string): Promise<{ score: number; reasoning: st
         temperature: 0,
       })
       const raw = completion.choices[0]?.message?.content ?? ''
-      return parseScoreJSON(raw)
+      return parseMergedJSON(raw)
     } catch (err) {
       lastErr = err
       if (!isRateLimit(err) || attempt === MAX_RETRIES) break
@@ -60,8 +105,12 @@ async function callJudge(prompt: string): Promise<{ score: number; reasoning: st
       await sleep(wait)
     }
   }
-  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr)
-  return { score: 0, reasoning: `judge call failed: ${msg}` }
+  const msg = `judge call failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`
+  return {
+    precision: { score: 0, reasoning: msg },
+    faithfulness: { score: 0, reasoning: msg },
+    relevancy: { score: 0, reasoning: msg },
+  }
 }
 
 /** Strip whitespace and punctuation, lowercase — for loose content matching. */
@@ -97,86 +146,60 @@ export function scoreContextRecall(
 }
 
 /**
- * 2. 检索精确率：LLM 判断 retrieved chunks 里有多少真正与问题相关
+ * 一次 LLM 调用同时评估 精确率 / 忠实度 / 相关性。
+ *
+ * 相比三次独立调用：请求量降 2/3，token 省（chunk 只传一次），
+ * 大幅缓解 429 限流。代价是一次失败则三个指标连带为 0。
+ *
+ * - 精确率 Precision：检索到的片段对回答问题是否有用
+ * - 忠实度 Faithfulness：回答是否完全基于片段、无编造
+ * - 相关性 Relevancy：回答是否切题、覆盖期望答案
  */
-export async function scoreContextPrecision(
+export async function scoreLLMMetrics(
   question: string,
   retrievedChunks: DocumentChunk[],
-): Promise<{ score: number; reasoning: string }> {
-  if (retrievedChunks.length === 0) return { score: 0, reasoning: 'no chunks retrieved' }
+  answer: string,
+  expected: string,
+): Promise<LLMMetricScores> {
+  if (retrievedChunks.length === 0) {
+    const reason = 'no chunks retrieved'
+    return {
+      precision: { score: 0, reasoning: reason },
+      faithfulness: { score: 0, reasoning: reason },
+      relevancy: { score: 0, reasoning: reason },
+    }
+  }
 
   const chunksText = retrievedChunks
     .map((c, i) => `[Chunk ${i + 1}]\n${c.content}`)
     .join('\n\n')
 
-  const prompt = `判断以下文档片段对回答问题是否有用。
+  const prompt = `你是 RAG 评估专家。请基于以下信息，从三个维度独立打分（每个维度 0-1）。
 
 问题：${question}
 
+期望答案：${expected}
+
 检索到的片段：
-${chunksText}
-
-打分 (0-1)：
-- 1.0：所有片段都与问题强相关
-- 0.5：部分片段相关
-- 0.0：片段都与问题无关
-
-严格输出 JSON：{"score": 0.x, "reasoning": "简短说明哪些相关哪些不相关"}`
-
-  return callJudge(prompt)
-}
-
-/**
- * 3. 答案忠实度：判断回答是否完全基于检索内容，没有编造
- */
-export async function scoreFaithfulness(
-  answer: string,
-  retrievedChunks: DocumentChunk[],
-): Promise<{ score: number; reasoning: string }> {
-  if (retrievedChunks.length === 0) return { score: 0, reasoning: 'no chunks to verify against' }
-
-  const chunksText = retrievedChunks
-    .map((c, i) => `[Chunk ${i + 1}]\n${c.content}`)
-    .join('\n\n')
-
-  const prompt = `判断 AI 的回答是否完全基于提供的文档片段，没有编造或混入外部知识。
-
-文档片段：
 ${chunksText}
 
 AI 回答：
 ${answer}
 
-打分 (0-1)：
-- 1.0：回答完全来自片段，无编造
-- 0.5：部分来自片段，有合理但未在片段中明确出现的内容
-- 0.0：明显编造或与片段矛盾
+评分维度：
+1. precision（检索精确率）：检索到的片段对回答问题是否有用。
+   - 1.0 所有片段强相关 / 0.5 部分相关 / 0.0 都无关
+2. faithfulness（答案忠实度）：AI 回答是否完全基于检索片段，无编造或外部知识。
+   - 1.0 完全来自片段 / 0.5 部分来自、有合理但未明确出现的内容 / 0.0 明显编造或矛盾
+3. relevancy（答案相关性）：AI 回答是否切题、是否覆盖期望答案的核心信息。
+   - 1.0 完全切题且覆盖核心 / 0.5 部分切题或部分覆盖 / 0.0 答非所问
 
-严格输出 JSON：{"score": 0.x, "reasoning": "指出哪些内容来自片段、哪些是编造"}`
+严格输出 JSON（不要任何额外文字）：
+{
+  "precision":    {"score": 0.x, "reasoning": "简短说明"},
+  "faithfulness": {"score": 0.x, "reasoning": "简短说明"},
+  "relevancy":    {"score": 0.x, "reasoning": "简短说明"}
+}`
 
-  return callJudge(prompt)
-}
-
-/**
- * 4. 答案相关性：判断回答是否切题、是否与期望答案一致
- */
-export async function scoreAnswerRelevancy(
-  question: string,
-  answer: string,
-  expected: string,
-): Promise<{ score: number; reasoning: string }> {
-  const prompt = `判断 AI 的回答是否切题、是否覆盖了期望答案的核心信息。
-
-问题：${question}
-期望答案：${expected}
-AI 回答：${answer}
-
-打分 (0-1)：
-- 1.0：完全切题且包含期望答案的核心信息
-- 0.5：部分切题或部分覆盖
-- 0.0：答非所问或完全不一致
-
-严格输出 JSON：{"score": 0.x, "reasoning": "对比期望与实际答案的差异"}`
-
-  return callJudge(prompt)
+  return callMergedJudge(prompt)
 }

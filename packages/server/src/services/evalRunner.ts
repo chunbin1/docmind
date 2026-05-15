@@ -10,12 +10,7 @@ import {
   getTestSet,
   getRun,
 } from './evalStore.js'
-import {
-  scoreContextRecall,
-  scoreContextPrecision,
-  scoreFaithfulness,
-  scoreAnswerRelevancy,
-} from './evalJudge.js'
+import { scoreContextRecall, scoreLLMMetrics } from './evalJudge.js'
 import type { EvalRun, EvalConfigSnapshot } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
@@ -104,11 +99,14 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
         c.expected_answer,
         retrievedChunks.map(rc => rc.content),
       )
-      // Serial judge calls to stay under Zhipu rate limits (especially for glm-4.7).
-      // Per-case latency goes up, but throughput stays sustainable.
-      const precision = await scoreContextPrecision(c.question, retrievedChunks)
-      const faithfulness = await scoreFaithfulness(answer, retrievedChunks)
-      const relevancy = await scoreAnswerRelevancy(c.question, answer, c.expected_answer)
+      // Single judge call for all 3 LLM metrics — 1/3 the requests, which
+      // largely sidesteps Zhipu rate limits (vs. 3 separate calls per case).
+      const { precision, faithfulness, relevancy } = await scoreLLMMetrics(
+        c.question,
+        retrievedChunks,
+        answer,
+        c.expected_answer,
+      )
 
       const reasoning = JSON.stringify({
         precision: precision.reasoning,
