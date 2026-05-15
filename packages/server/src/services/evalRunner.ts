@@ -98,7 +98,12 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
       const retrievedIds = retrievedChunks.map(rc => `${testSet.doc_id}_chunk_${rc.chunk_index}`)
       const answer = await generateAnswer(c.question, retrievedChunks)
 
-      const recall = scoreContextRecall(retrievedIds, c.ground_truth_chunk_id)
+      const recall = scoreContextRecall(
+        retrievedIds,
+        c.ground_truth_chunk_id,
+        c.expected_answer,
+        retrievedChunks.map(rc => rc.content),
+      )
       // Serial judge calls to stay under Zhipu rate limits (especially for glm-4.7).
       // Per-case latency goes up, but throughput stays sustainable.
       const precision = await scoreContextPrecision(c.question, retrievedChunks)

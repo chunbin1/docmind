@@ -64,14 +64,36 @@ async function callJudge(prompt: string): Promise<{ score: number; reasoning: st
   return { score: 0, reasoning: `judge call failed: ${msg}` }
 }
 
+/** Strip whitespace and punctuation, lowercase — for loose content matching. */
+function normalizeForMatch(s: string): string {
+  return s.replace(/[\s\p{P}]/gu, '').toLowerCase()
+}
+
 /**
- * 1. 检索召回率：规则判断 — retrieved 是否包含 ground truth
+ * 1. 检索召回率：规则判断。
+ *
+ * 命中条件（满足其一即 1 分）：
+ * - 检索到的 chunk 里包含标注的 ground_truth_chunk（精确匹配 chunk id）
+ * - 或：期望答案的文本实质性出现在任一检索到的 chunk 内容里
+ *   （答案常分散在多个 chunk，单 chunk_id 匹配会低估召回率）
+ *
+ * expectedAnswer / retrievedContents 为可选 —— 不传时退化为纯 chunk_id 匹配。
  */
 export function scoreContextRecall(
   retrievedChunkIds: string[],
   groundTruthChunkId: string,
+  expectedAnswer?: string,
+  retrievedContents?: string[],
 ): number {
-  return retrievedChunkIds.includes(groundTruthChunkId) ? 1 : 0
+  if (retrievedChunkIds.includes(groundTruthChunkId)) return 1
+  if (expectedAnswer && retrievedContents && retrievedContents.length > 0) {
+    const want = normalizeForMatch(expectedAnswer)
+    // 太短的答案（如单字）做包含匹配噪音大，要求至少 4 个有效字符
+    if (want.length >= 4 && retrievedContents.some(c => normalizeForMatch(c).includes(want))) {
+      return 1
+    }
+  }
+  return 0
 }
 
 /**
