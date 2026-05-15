@@ -159,13 +159,14 @@ export async function resumeEvaluation(runId: string): Promise<EvalRun> {
       }
       if (prev) deleteResult(runId, c.id) // 删掉旧的失败结果，重评
       const t0 = Date.now()
+      console.log(`[resume] #${i + 1}/${cases.length} 开始评估 → ${c.question}`)
       const r = await evaluateCase(runId, testSet.doc_id, c)
       done++
       const ok = r.context_precision > 0 || r.faithfulness > 0 || r.answer_relevancy > 0
       console.log(
-        `[resume] ${i + 1}/${cases.length} (跳过保留 ${kept}, 已重评 ${done}) ` +
+        `[resume] #${i + 1}/${cases.length} 完成 (跳过保留 ${kept}, 已重评 ${done}) ` +
           `用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ${ok ? '✓' : '✗429假0'} ` +
-          `P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy}`,
+          `P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} | ${c.question}`,
       )
     }
     return recomputeAndFinish(runId)
@@ -201,12 +202,14 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
   console.log(`[eval] run ${run.id}: ${cases.length} cases`)
   try {
     for (let i = 0; i < cases.length; i++) {
+      const c = cases[i]
       const t0 = Date.now()
-      const r = await evaluateCase(run.id, testSet.doc_id, cases[i])
+      console.log(`[eval] #${i + 1}/${cases.length} 开始评估 → ${c.question}`)
+      const r = await evaluateCase(run.id, testSet.doc_id, c)
       const ok = r.context_precision > 0 || r.faithfulness > 0 || r.answer_relevancy > 0
       console.log(
-        `[eval] ${i + 1}/${cases.length} 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ` +
-          `${ok ? '✓' : '✗429假0'} P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy}`,
+        `[eval] #${i + 1}/${cases.length} 完成 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ` +
+          `${ok ? '✓' : '✗429假0'} P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy} | ${c.question}`,
       )
     }
     return recomputeAndFinish(run.id)
