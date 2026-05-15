@@ -146,12 +146,27 @@ export async function resumeEvaluation(runId: string): Promise<EvalRun> {
   const cases = getCasesByTestSet(run.test_set_id)
   const existing = new Map(getResultsByRun(runId).map(r => [r.case_id, r]))
 
+  let kept = 0
+  let done = 0
+  console.log(`[resume] run ${runId}: ${cases.length} cases total`)
   try {
-    for (const c of cases) {
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i]
       const prev = existing.get(c.id)
-      if (prev && isGoodResult(prev.judge_reasoning)) continue // 保留好结果
+      if (prev && isGoodResult(prev.judge_reasoning)) {
+        kept++
+        continue // 保留好结果
+      }
       if (prev) deleteResult(runId, c.id) // 删掉旧的失败结果，重评
-      await evaluateCase(runId, testSet.doc_id, c)
+      const t0 = Date.now()
+      const r = await evaluateCase(runId, testSet.doc_id, c)
+      done++
+      const ok = r.context_precision > 0 || r.faithfulness > 0 || r.answer_relevancy > 0
+      console.log(
+        `[resume] ${i + 1}/${cases.length} (跳过保留 ${kept}, 已重评 ${done}) ` +
+          `用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ${ok ? '✓' : '✗429假0'} ` +
+          `P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy}`,
+      )
     }
     return recomputeAndFinish(runId)
   } catch (err) {
@@ -183,9 +198,16 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
     config_snapshot: JSON.stringify(config),
   })
 
+  console.log(`[eval] run ${run.id}: ${cases.length} cases`)
   try {
-    for (const c of cases) {
-      await evaluateCase(run.id, testSet.doc_id, c)
+    for (let i = 0; i < cases.length; i++) {
+      const t0 = Date.now()
+      const r = await evaluateCase(run.id, testSet.doc_id, cases[i])
+      const ok = r.context_precision > 0 || r.faithfulness > 0 || r.answer_relevancy > 0
+      console.log(
+        `[eval] ${i + 1}/${cases.length} 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s ` +
+          `${ok ? '✓' : '✗429假0'} P=${r.context_precision} F=${r.faithfulness} R=${r.answer_relevancy}`,
+      )
     }
     return recomputeAndFinish(run.id)
   } catch (err) {
