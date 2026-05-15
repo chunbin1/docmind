@@ -19,9 +19,9 @@ initDocumentTables(sqliteDb)
 initEvalTables(sqliteDb)
 await initDocCollection()
 
-console.log(`[resume] resuming run ${runId} ...`)
+console.error(`[resume] resuming run ${runId} ...`)
 const run = await resumeEvaluation(runId)
-console.log('[resume] done:', {
+console.error('[resume] done:', {
   status: run.status,
   recall: run.avg_context_recall,
   precision: run.avg_context_precision,

@@ -123,7 +123,7 @@ async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
       // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s
       const base = 2000 * Math.pow(2, attempt)
       const wait = base + Math.floor(Math.random() * 1000)
-      console.log(`[judge] 429 限流，第 ${attempt + 1}/${MAX_RETRIES} 次重试，等待 ${(wait / 1000).toFixed(1)}s`)
+      console.error(`[judge] 429 限流，第 ${attempt + 1}/${MAX_RETRIES} 次重试，等待 ${(wait / 1000).toFixed(1)}s`)
       await sleep(wait)
     }
   }
