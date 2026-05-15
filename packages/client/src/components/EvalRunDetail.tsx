@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
-import type { EvalRun, EvalResult } from '../types'
+import type { EvalRun, EvalResultWithCase } from '../types'
 import styles from './EvalRunDetail.module.css'
 
 interface EvalRunDetailProps {
   runId: string
   onClose: () => void
-  fetchDetail: (runId: string) => Promise<{ run: EvalRun; results: EvalResult[] } | null>
+  fetchDetail: (runId: string) => Promise<{ run: EvalRun; results: EvalResultWithCase[] } | null>
 }
 
 export function EvalRunDetail({ runId, onClose, fetchDetail }: EvalRunDetailProps) {
-  const [data, setData] = useState<{ run: EvalRun; results: EvalResult[] } | null>(null)
+  const [data, setData] = useState<{ run: EvalRun; results: EvalResultWithCase[] } | null>(null)
 
   useEffect(() => {
     void fetchDetail(runId).then(setData)
@@ -64,6 +64,12 @@ export function EvalRunDetail({ runId, onClose, fetchDetail }: EvalRunDetailProp
 
                   return (
                     <div key={r.id} className={styles.caseItem}>
+                      <div className={styles.caseField}>
+                        <span className={styles.caseLabel}>问题 [{r.difficulty}]:</span> {r.question}
+                      </div>
+                      <div className={styles.caseField}>
+                        <span className={styles.caseLabel}>期望答案:</span> {r.expected_answer}
+                      </div>
                       <div className={styles.caseField}>
                         <span className={styles.caseLabel}>检索块:</span> {retrievedIds.join(', ')}
                       </div>

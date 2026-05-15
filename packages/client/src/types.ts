@@ -96,3 +96,10 @@ export interface EvalResult {
   answer_relevancy: number | null
   judge_reasoning: string | null
 }
+
+/** A result joined with its source case (returned by GET /api/eval/runs/:id). */
+export interface EvalResultWithCase extends EvalResult {
+  question: string
+  expected_answer: string
+  difficulty: EvalDifficulty
+}

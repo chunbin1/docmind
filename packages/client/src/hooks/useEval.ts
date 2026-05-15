@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { EvalTestSet, EvalRun, EvalCase, EvalResult } from '../types'
+import type { EvalTestSet, EvalRun, EvalCase, EvalResultWithCase } from '../types'
 
 const API = 'http://localhost:3001/api'
 
@@ -12,7 +12,7 @@ export interface UseEvalReturn {
   generate: (docId: string) => Promise<EvalTestSet | null>
   runEval: (testSetId: string) => Promise<EvalRun | null>
   deleteTestSet: (id: string) => Promise<void>
-  fetchRunDetail: (runId: string) => Promise<{ run: EvalRun; results: EvalResult[] } | null>
+  fetchRunDetail: (runId: string) => Promise<{ run: EvalRun; results: EvalResultWithCase[] } | null>
   fetchTestSetDetail: (id: string) => Promise<{ testSet: EvalTestSet; cases: EvalCase[] } | null>
 }
 
@@ -90,7 +90,7 @@ export function useEval(): UseEvalReturn {
   const fetchRunDetail = useCallback(async (runId: string) => {
     const res = await fetch(`${API}/eval/runs/${runId}`)
     if (!res.ok) return null
-    return res.json() as Promise<{ run: EvalRun; results: EvalResult[] }>
+    return res.json() as Promise<{ run: EvalRun; results: EvalResultWithCase[] }>
   }, [])
 
   const fetchTestSetDetail = useCallback(async (id: string) => {

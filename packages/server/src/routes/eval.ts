@@ -7,7 +7,7 @@ import {
   getCasesByTestSet,
   getAllRuns,
   getRun,
-  getResultsByRun,
+  getResultsWithCaseByRun,
 } from '../services/evalStore.js'
 import { generateTestSet } from '../services/evalGenerator.js'
 import { runEvaluation } from '../services/evalRunner.js'
@@ -82,7 +82,7 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Params: { id: string } }>('/eval/runs/:id', async (req, reply) => {
     const run = getRun(req.params.id)
     if (!run) return reply.code(404).send({ error: 'run not found' })
-    const results = getResultsByRun(run.id)
+    const results = getResultsWithCaseByRun(run.id)
     return { run, results }
   })
 }

@@ -232,3 +232,22 @@ export function getResultsByRun(runId: string): EvalResult[] {
     .prepare('SELECT * FROM eval_results WHERE run_id = ?')
     .all(runId) as EvalResult[]
 }
+
+/**
+ * Results joined with their source case so the UI can show the question and
+ * expected answer alongside the generated answer and scores.
+ */
+export function getResultsWithCaseByRun(
+  runId: string,
+): Array<EvalResult & { question: string; expected_answer: string; difficulty: string }> {
+  return db()
+    .prepare(`
+      SELECT r.*, c.question, c.expected_answer, c.difficulty
+      FROM eval_results r
+      JOIN eval_cases c ON c.id = r.case_id
+      WHERE r.run_id = ?
+    `)
+    .all(runId) as Array<
+    EvalResult & { question: string; expected_answer: string; difficulty: string }
+  >
+}
