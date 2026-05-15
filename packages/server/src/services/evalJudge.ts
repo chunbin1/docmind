@@ -161,18 +161,13 @@ export async function scoreLLMMetrics(
   answer: string,
   expected: string,
 ): Promise<LLMMetricScores> {
-  if (retrievedChunks.length === 0) {
-    const reason = 'no chunks retrieved'
-    return {
-      precision: { score: 0, reasoning: reason },
-      faithfulness: { score: 0, reasoning: reason },
-      relevancy: { score: 0, reasoning: reason },
-    }
-  }
-
-  const chunksText = retrievedChunks
-    .map((c, i) => `[Chunk ${i + 1}]\n${c.content}`)
-    .join('\n\n')
+  // Note: we do NOT early-return when chunks are empty. Precision/faithfulness
+  // will naturally score ~0 (nothing was retrieved / nothing to ground on),
+  // but relevancy only depends on question/answer/expected and must still be
+  // judged — zeroing it on empty retrieval would be a false negative.
+  const chunksText = retrievedChunks.length
+    ? retrievedChunks.map((c, i) => `[Chunk ${i + 1}]\n${c.content}`).join('\n\n')
+    : '（未检索到任何片段）'
 
   const prompt = `你是 RAG 评估专家。请基于以下信息，从三个维度独立打分（每个维度 0-1）。
 
@@ -194,7 +189,7 @@ ${answer}
 3. relevancy（答案相关性）：AI 回答是否切题、是否覆盖期望答案的核心信息。
    - 1.0 完全切题且覆盖核心 / 0.5 部分切题或部分覆盖 / 0.0 答非所问
 
-严格输出 JSON（不要任何额外文字）：
+严格输出 JSON（不要任何额外文字，键名必须为英文 precision / faithfulness / relevancy）：
 {
   "precision":    {"score": 0.x, "reasoning": "简短说明"},
   "faithfulness": {"score": 0.x, "reasoning": "简短说明"},
