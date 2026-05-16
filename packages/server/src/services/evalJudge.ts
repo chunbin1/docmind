@@ -1,7 +1,7 @@
 // packages/server/src/services/evalJudge.ts
 import OpenAI from 'openai'
 import type { DocumentChunk } from '../types.js'
-import { throttledCompletion, isRateLimit } from './llmThrottle.js'
+import { throttledCompletion, isRetryable } from './llmThrottle.js'
 
 // Judge uses a separate (more capable) model — independent of ZHIPU_MODEL,
 // so the system being evaluated can stay on a cheaper model while scoring
@@ -117,11 +117,14 @@ async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
       return parseMergedJSON(raw, usage)
     } catch (err) {
       lastErr = err
-      if (!isRateLimit(err) || attempt === MAX_RETRIES) break
+      if (!isRetryable(err) || attempt === MAX_RETRIES) break
       // Exponential backoff with jitter: 2s, 4s, 8s, 16s, 32s
       const base = 2000 * Math.pow(2, attempt)
       const wait = base + Math.floor(Math.random() * 1000)
-      console.error(`[judge] 429 限流，第 ${attempt + 1}/${MAX_RETRIES} 次重试，等待 ${(wait / 1000).toFixed(1)}s`)
+      const why = err instanceof Error ? err.message : String(err)
+      console.error(
+        `[judge] 调用失败(${why})，第 ${attempt + 1}/${MAX_RETRIES} 次重试，等待 ${(wait / 1000).toFixed(1)}s`,
+      )
       await sleep(wait)
     }
   }
