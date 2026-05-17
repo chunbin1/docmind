@@ -7,10 +7,12 @@ import 'dotenv/config'
 import { chatRoutes } from './routes/chat.js'
 import { documentRoutes } from './routes/documents.js'
 import { memoryRoutes } from './routes/memory.js'
+import { evalRoutes } from './routes/eval.js'
 import { initDb } from './services/memoryStore.js'
 import { initCollection } from './services/memoryVector.js'
 import { initDocumentTables } from './services/documentStore.js'
 import { initDocCollection } from './services/documentVector.js'
+import { initEvalTables } from './services/evalStore.js'
 
 const app = Fastify({
   logger: {
@@ -31,12 +33,14 @@ await app.register(multipart, {
 
 const sqliteDb = initDb()
 initDocumentTables(sqliteDb)
+initEvalTables(sqliteDb)
 await initCollection()
 await initDocCollection()
 
 await app.register(chatRoutes, { prefix: '/api' })
 await app.register(documentRoutes, { prefix: '/api' })
 await app.register(memoryRoutes, { prefix: '/api' })
+await app.register(evalRoutes, { prefix: '/api' })
 
 app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 

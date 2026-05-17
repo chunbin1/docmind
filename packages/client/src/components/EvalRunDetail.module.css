@@ -1,0 +1,119 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  width: min(900px, 90vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--gray-200);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 8px;
+  color: var(--gray-500);
+}
+
+.body {
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.summaryCard {
+  padding: 8px;
+  background: var(--gray-50);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+.summaryValue {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.caseList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.caseItem {
+  padding: 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.caseField {
+  margin-bottom: 6px;
+}
+
+.caseLabel {
+  color: var(--gray-500);
+  font-weight: 500;
+}
+
+.caseScores {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.score {
+  padding: 2px 6px;
+  background: var(--gray-100);
+  border-radius: 3px;
+}
+
+.scoreGood { background: #d1fae5; color: #047857; }
+.scoreBad { background: #fee2e2; color: #b91c1c; }
+
+.reasoning {
+  margin-top: 6px;
+  padding: 6px;
+  background: #fffaeb;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--gray-700);
+  white-space: pre-wrap;
+}

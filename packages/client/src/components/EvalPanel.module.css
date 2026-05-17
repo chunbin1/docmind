@@ -1,0 +1,137 @@
+.container {
+  padding: 12px;
+  border-top: 1px solid var(--gray-200);
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--gray-700);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.select {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: white;
+}
+
+.btn {
+  padding: 6px 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--gray-50);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary {
+  background: var(--purple);
+  color: white;
+  border-color: var(--purple);
+}
+
+.primary:hover {
+  background: var(--purple);
+  opacity: 0.9;
+}
+
+.testSetList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.testSetItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.testSetItemActions {
+  display: flex;
+  gap: 4px;
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runCard {
+  padding: 8px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.runCard:hover {
+  background: #eef0f4;
+}
+
+.runHeader {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--gray-600);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  font-size: 11px;
+  color: var(--gray-700);
+}
+
+.error {
+  color: #b91c1c;
+  font-size: 11px;
+  margin: 4px 0;
+}
+
+.empty {
+  font-size: 11px;
+  color: var(--gray-400);
+  text-align: center;
+  padding: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: var(--gray-200);
+  color: var(--gray-700);
+}
+
+.badgeDone { background: #d1fae5; color: #047857; }
+.badgeFailed { background: #fee2e2; color: #b91c1c; }
+.badgeRunning { background: #fef3c7; color: #92400e; }

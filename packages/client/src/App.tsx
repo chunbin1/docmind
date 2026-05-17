@@ -4,6 +4,7 @@ import { useDocuments } from './hooks/useDocuments'
 import { Message } from './components/Message'
 import { ChatInput } from './components/ChatInput'
 import { MemoryPanel } from './components/MemoryPanel'
+import { EvalPanel } from './components/EvalPanel'
 import styles from './App.module.css'
 
 export default function App() {
@@ -32,6 +33,8 @@ export default function App() {
         </div>
 
         <MemoryPanel />
+
+        <EvalPanel documents={docs.documents} />
 
         <div className={styles.sideBottom}>
           <button className={styles.clearBtn} onClick={clearMessages}>
