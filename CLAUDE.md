@@ -69,11 +69,20 @@ Managed with pnpm workspaces (`pnpm-workspace.yaml`). Root `package.json` has co
 - **`llm.ts`** — Provider abstraction: exports `streamChat(options)` which dispatches to `streamAnthropic` or `streamZhipu`. Both return async generators yielding text chunks. Has quota-error detection (`isQuotaError`) to skip retries.
 - **`types.ts`** — Shared TypeScript types: `LLMProvider`, `LLMMessage`, `StreamChatOptions`, `MemoryNote`, `ParsedCompact`
 - **`routes/chat.ts`** — Chat endpoints. `POST /api/chat/stream` runs tool pre-flight + memory retrieval in parallel, then streams response. `POST /api/chat/compact` summarizes history and extracts facts. `POST /api/chat/nudge` silently extracts facts from recent messages.
-- **`routes/documents.ts`** — Placeholder for Milestone 2 document upload/retrieval.
+- **`routes/documents.ts`** — Document upload/list/delete: `POST/GET/DELETE /api/documents`. Parses PDF, chunks, embeds, stores in ChromaDB (fire-and-forget upsert).
 - **`routes/memory.ts`** — CRUD for memory notes: `GET /api/memory`, `POST /api/memory`, `DELETE /api/memory/:id`, `DELETE /api/memory`.
-- **`services/memoryStore.ts`** — SQLite-backed memory store via `better-sqlite3`. FTS5 full-text search. Max 100 notes, 200 chars each. Auto-evicts oldest when over limit.
+- **`routes/eval.ts`** — RAG evaluation API: generate test sets, run/resume evaluations, list runs, fetch run detail (with question/answer/scores).
+- **`services/memoryStore.ts`** — SQLite-backed memory store via `better-sqlite3`. FTS5 full-text search. Max 100 notes, 200 chars each. Auto-evicts oldest when over limit. Exports `DB` type shared by other stores.
 - **`services/memoryVector.ts`** — ChromaDB integration for semantic (vector) search. Falls back gracefully if ChromaDB is unavailable.
-- **`services/embeddings.ts`** — Zhipu `embedding-3` API wrapper. `isEmbeddingAvailable()` checks for API key and `DISABLE_EMBEDDING` flag.
+- **`services/documentStore.ts`** — SQLite `documents` table (id, filename, size, chunk_count). Shares the memory DB connection.
+- **`services/documentVector.ts`** — ChromaDB `docmind_docs` collection. `upsertChunks`, `searchChunks` (filter by doc_id), `getAllChunksByDoc`. `ZhipuEmbeddingFunction` attached.
+- **`services/pdfParser.ts`** — `pdf-parse` (CJS via `createRequire`) + recursive character splitter (500-char chunks, 50 overlap).
+- **`services/embeddings.ts`** — Zhipu `embedding-3` API via native `fetch` (OpenAI SDK returned zero vectors for Zhipu). `embedBatch` chunks input into ≤64 (Zhipu API limit). Exports `ZhipuEmbeddingFunction`.
+- **`services/evalStore.ts`** — SQLite eval tables: `eval_test_sets`, `eval_cases`, `eval_runs`, `eval_results`. Idempotent ALTER-TABLE migrations.
+- **`services/evalGenerator.ts`** — LLM auto-generates 2-3 Q&A pairs per chunk into a test set.
+- **`services/evalJudge.ts`** — LLM-as-Judge: rule-based context recall + merged single-call scoring (precision/faithfulness/relevancy) with token usage capture.
+- **`services/evalRunner.ts`** — Orchestrates a run (search → answer → score → persist); `resumeEvaluation` re-runs only failed/missing cases.
+- **`services/llmThrottle.ts`** — Adaptive slow-start throttle (12s → shrink on success, ×2 on 429, 90s call timeout) shared by all eval LLM calls.
 - **`tools/weather.ts`** — Fetches real-time weather from `wttr.in` (free, no API key). Returns formatted Chinese string.
 
 ### Frontend (`packages/client/src/`)
@@ -156,7 +165,15 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 | POST | `/api/memory` | Add a memory note |
 | DELETE | `/api/memory/:id` | Delete one note |
 | DELETE | `/api/memory` | Clear all notes |
-| GET | `/api/documents` | Document list (M2, placeholder) |
+| GET | `/api/documents` | List uploaded documents |
+| POST | `/api/documents` | Upload a PDF (multipart) — parse, chunk, embed |
+| DELETE | `/api/documents/:id` | Delete a document + its chunks |
+| POST | `/api/eval/generate` | Auto-generate a test set for a document |
+| GET | `/api/eval/test-sets` | List test sets / `/:id` for cases |
+| DELETE | `/api/eval/test-sets/:id` | Delete a test set (cascade) |
+| POST | `/api/eval/runs` | Run an evaluation (blocking) |
+| POST | `/api/eval/runs/:id/resume` | Resume a failed/interrupted run |
+| GET | `/api/eval/runs` | List runs / `/:id` for results |
 
 ### Infrastructure
 
@@ -170,4 +187,6 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 
 - **Milestone 1 complete**: SSE streaming, history management, compression, pinning, dual LLM, localStorage
 - **Milestone 1.5 complete**: Full TypeScript migration (frontend + backend), memory system (SQLite + ChromaDB + embeddings), tool calling (weather via wttr.in)
-- **Milestone 2 pending**: Document upload (PDF/TXT parsing), ChromaDB document embedding/retrieval, semantic search over docs, citation UI, document management
+- **Milestone 2 complete**: PDF upload + parsing, recursive chunking, ChromaDB document embedding/retrieval, per-message document attachment UI (📎 picker), RAG injection into system prompt
+- **Milestone 3 complete**: RAG automated evaluation system — LLM auto-generated test sets, merged LLM-as-Judge (recall/precision/faithfulness/relevancy), adaptive throttle + resumable runs + token tracking, EvalPanel UI. Baseline on 184-case set: Recall 88.0% / Precision 73.7% / Faithfulness 90.5% / Relevancy 89.5% (see `docs/superpowers/specs/2026-05-16-rag-evaluation-report.md`)
+- **Next**: precision is the bottleneck (~1/4 retrieved chunks are noise) — roadmap is rerank + section-based chunking

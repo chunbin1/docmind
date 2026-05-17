@@ -32,9 +32,11 @@
 - [x] 对话摘要自动提取事实（Smart Compact）
 - [x] 每 10 轮静默提取关键信息（Nudge）
 - [x] 记忆面板 UI（查看 / 搜索 / 增删）
-- [ ] PDF / TXT 文档上传与解析
-- [ ] 文档向量化与 RAG 问答
+- [x] PDF 文档上传与解析（递归字符分块）
+- [x] 文档向量化与 RAG 问答（ChromaDB + 每条消息附加文档）
+- [x] RAG 自动化评估系统（LLM 出题 + LLM-as-Judge 四维打分）
 - [ ] 引用来源标注
+- [ ] 检索精排（Rerank）与按章节分块
 
 ### 快速开始
 
@@ -164,9 +166,11 @@ A RAG (Retrieval-Augmented Generation) document Q&A application with streaming c
 - [x] Auto fact extraction from summaries (Smart Compact)
 - [x] Silent fact extraction every 10 turns (Nudge)
 - [x] Memory Panel UI (view / search / add / delete)
-- [ ] PDF / TXT document upload and parsing
-- [ ] Document vectorization and RAG Q&A
+- [x] PDF document upload and parsing (recursive character chunking)
+- [x] Document vectorization and RAG Q&A (ChromaDB + per-message doc attach)
+- [x] RAG automated evaluation system (LLM-generated test sets + LLM-as-Judge)
 - [ ] Citation source annotation
+- [ ] Retrieval rerank & section-based chunking
 
 ### Quick Start
 
