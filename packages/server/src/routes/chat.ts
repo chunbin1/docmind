@@ -7,6 +7,7 @@ import { upsertNote, semanticSearch, isVectorAvailable } from '../services/memor
 import type { LLMMessage, MemoryNote, ParsedCompact, DocumentChunk } from '../types.js'
 import { searchChunks, isDocVectorAvailable } from '../services/documentVector.js'
 import { getWeather } from '../tools/weather.js'
+import { logLlmRequest } from '../llmLog.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
@@ -49,10 +50,13 @@ async function runToolsIfNeeded(
     { role: 'user', content: message },
   ]
 
+  const model = process.env.ZHIPU_MODEL ?? 'glm-4.7'
+  logLlmRequest('chat/tool-preflight', { model, messages, tools: TOOLS })
+
   let response: OpenAI.Chat.ChatCompletion
   try {
     response = await client.chat.completions.create({
-      model: process.env.ZHIPU_MODEL ?? 'glm-4.7',
+      model,
       messages,
       tools: TOOLS,
       tool_choice: 'auto',
@@ -115,7 +119,7 @@ async function getRelevantNotes(query: string, topK = 3): Promise<MemoryNote[]> 
 
 async function getRelevantChunks(query: string, docIds: string[]): Promise<DocumentChunk[]> {
   if (!docIds.length || !isDocVectorAvailable()) return []
-  return searchChunks(query, docIds, 3)
+  return searchChunks(query, docIds) // 距离阈值 + 动态 k（见 ragConfig）
 }
 
 function persistFacts(facts: string[], source: string): MemoryNote[] {
@@ -206,7 +210,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     ]
 
     try {
-      const stream = streamChat({ messages, system: finalSystem })
+      const stream = streamChat({ messages, system: finalSystem, tag: 'chat/stream' })
       for await (const text of stream) send({ text })
       send({ done: true })
     } catch (err) {
@@ -236,6 +240,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       }],
       system: '你是对话分析助手，专注提炼关键信息和重要事实。',
       maxTokens: 1024,
+      tag: 'chat/compact',
     })
     for await (const text of stream) rawOutput += text
 
@@ -264,6 +269,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         }],
         system: '你是记忆提取助手，只输出事实条目，不解释，不加序号。',
         maxTokens: 300,
+        tag: 'chat/nudge',
       })
       for await (const text of stream) rawFacts += text
     } catch (err) {

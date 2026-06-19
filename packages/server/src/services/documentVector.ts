@@ -1,7 +1,22 @@
 // packages/server/src/services/documentVector.ts
 import { ChromaClient } from 'chromadb'
 import { embedBatch, isEmbeddingAvailable, ZhipuEmbeddingFunction } from './embeddings.js'
+import { RAG, candidatePool } from './ragConfig.js'
 import type { DocumentChunk } from '../types.js'
+
+const LOG_RETRIEVAL = /^(1|true)$/i.test(process.env.LOG_RETRIEVAL ?? '')
+
+/** 打印一次检索的候选块距离 + 阈值筛选结果（LOG_RETRIEVAL=1 开启）。 */
+function logRetrieval(query: string, candidates: DocumentChunk[], kept: DocumentChunk[]): void {
+  const keptIdx = new Set(kept.map(c => c.chunk_index))
+  const rows = candidates
+    .map(c => `    chunk_${c.chunk_index}  d=${c.distance.toFixed(4)}  ${keptIdx.has(c.chunk_index) ? '✓ 保留' : '✗ 丢弃'}`)
+    .join('\n')
+  console.error(
+    `\n🔍 检索 [阈值≤${RAG.distanceThreshold} min=${RAG.minK} max=${RAG.maxK}]  q="${query.slice(0, 40)}"\n` +
+      `  候选 ${candidates.length} → 保留 ${kept.length}\n${rows}`,
+  )
+}
 
 const COLLECTION_NAME = 'docmind_docs'
 const CHROMA_URL = process.env.CHROMA_URL ?? 'http://localhost:8000'
@@ -60,10 +75,19 @@ export async function upsertChunks(
   }
 }
 
+/**
+ * 语义检索：距离阈值 + 动态 k。
+ *
+ * 1. 从向量库粗筛一批候选（candidatePool 个，按距离升序）
+ * 2. 只保留 cosine 距离 <= RAG.distanceThreshold 的块，最多 maxK 个
+ * 3. 若通过阈值的不足 minK，兜底取最近的 minK 个（minK=0 时可返回空 → 拒答）
+ *
+ * maxK 默认取环境配置 RAG.maxK；调用方仍可显式传入覆盖。
+ */
 export async function searchChunks(
   query: string,
   docIds: string[],
-  topK = 3,
+  maxK = RAG.maxK,
 ): Promise<DocumentChunk[]> {
   if (!_available || !_collection || docIds.length === 0) return []
 
@@ -71,7 +95,7 @@ export async function searchChunks(
     const queryEmbedding = (await embedBatch([query]))[0]
     const results = await _collection.query({
       queryEmbeddings: [queryEmbedding],
-      nResults: topK,
+      nResults: candidatePool(maxK),
       where: docIds.length === 1
         ? { doc_id: { $eq: docIds[0] } }
         : { doc_id: { $in: docIds } },
@@ -82,13 +106,22 @@ export async function searchChunks(
     const metadatas = results.metadatas[0] ?? []
     const distances = results.distances?.[0] ?? []
 
-    return ids.map((_, i) => ({
+    // ChromaDB 按距离升序返回（最近的在前）
+    const candidates: DocumentChunk[] = ids.map((_, i) => ({
       doc_id: String((metadatas[i] as Record<string, unknown>)?.doc_id ?? ''),
       filename: String((metadatas[i] as Record<string, unknown>)?.filename ?? ''),
       chunk_index: Number((metadatas[i] as Record<string, unknown>)?.chunk_index ?? 0),
       content: documents[i] ?? '',
       distance: distances[i] ?? 0,
     }))
+
+    // 距离阈值 + 动态 k
+    const within = candidates.filter(c => c.distance <= RAG.distanceThreshold)
+    let kept = within.slice(0, maxK)
+    if (kept.length < RAG.minK) kept = candidates.slice(0, RAG.minK)
+
+    if (LOG_RETRIEVAL) logRetrieval(query, candidates, kept)
+    return kept
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`[documentVector] searchChunks failed: ${msg}`)

@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { getAllChunksByDoc } from './documentVector.js'
 import { getDocument } from './documentStore.js'
 import { createTestSet, insertCases, getAllTestSets } from './evalStore.js'
+import { logLlmRequest } from '../llmLog.js'
 import type { EvalTestSet, EvalDifficulty } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
@@ -83,9 +84,11 @@ export async function generateTestSet(docId: string): Promise<EvalTestSet> {
     if (chunk.content.trim().length < 50) continue
 
     try {
+      const prompt = buildPrompt(chunk.content)
+      logLlmRequest('eval/generate', { model: MODEL, messages: [{ role: 'user', content: prompt }] })
       const completion = await client.chat.completions.create({
         model: MODEL,
-        messages: [{ role: 'user', content: buildPrompt(chunk.content) }],
+        messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
       })
       const raw = completion.choices[0]?.message?.content ?? ''

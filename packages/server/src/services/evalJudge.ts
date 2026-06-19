@@ -2,6 +2,7 @@
 import OpenAI from 'openai'
 import type { DocumentChunk } from '../types.js'
 import { throttledCompletion, isRetryable } from './llmThrottle.js'
+import { logLlmRequest } from '../llmLog.js'
 
 // Judge uses a separate (more capable) model — independent of ZHIPU_MODEL,
 // so the system being evaluated can stay on a cheaper model while scoring
@@ -97,6 +98,7 @@ const MAX_RETRIES = 5
  * ultimately fails, all three metrics degrade to 0 with the error text.
  */
 async function callMergedJudge(prompt: string): Promise<LLMMetricScores> {
+  logLlmRequest('eval/judge', { model: MODEL, messages: [{ role: 'user', content: prompt }] })
   let lastErr: unknown
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
