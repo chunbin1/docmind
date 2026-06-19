@@ -15,6 +15,8 @@ export interface StreamChatOptions {
   messages: LLMMessage[]
   system?: string
   maxTokens?: number
+  /** 日志标签，标识调用来源（如 chat/stream、chat/compact）；仅用于 LOG_LLM 调试输出 */
+  tag?: string
 }
 
 /** A persisted memory note row from SQLite */
@@ -83,7 +85,9 @@ export interface EvalCase {
 export interface EvalConfigSnapshot {
   chunkSize: number
   overlap: number
-  topK: number
+  topK: number          // retrieval cap (= RAG.maxK under dynamic-k retrieval)
+  distanceThreshold?: number  // cosine distance cutoff; absent for pre-dynamic-k runs
+  minK?: number               // floor on returned chunks; absent for pre-dynamic-k runs
   model: string         // model used in the RAG pipeline (answer generation)
   embedModel: string
   judgeModel: string    // model used by LLM-as-Judge for scoring (defaults to glm-4.7)

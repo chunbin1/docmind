@@ -11,3 +11,6 @@ uploads/
 packages/server/data/memory.db
 packages/server/data/memory.db-shm
 packages/server/data/memory.db-wal
+
+# 本地测试用脚本与样例文档（不纳入版本控制）
+scratch/

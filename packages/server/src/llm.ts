@@ -2,6 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { LLMProvider, StreamChatOptions } from './types.js'
+import { logLlmRequest } from './llmLog.js'
 
 function detectProvider(): LLMProvider {
   const explicit = process.env.LLM_PROVIDER?.toLowerCase()
@@ -104,7 +105,22 @@ async function* streamZhipu({
 }
 
 export function streamChat(opts: StreamChatOptions): AsyncGenerator<string> {
-  if (PROVIDER === 'anthropic') return streamAnthropic(opts)
-  if (PROVIDER === 'zhipu') return streamZhipu(opts)
+  const tag = opts.tag ?? 'chat'
+  if (PROVIDER === 'anthropic') {
+    logLlmRequest(tag, {
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      system: opts.system,
+      messages: opts.messages,
+    })
+    return streamAnthropic(opts)
+  }
+  if (PROVIDER === 'zhipu') {
+    logLlmRequest(tag, {
+      model: getZhipuModels()[0],
+      system: opts.system,
+      messages: opts.messages,
+    })
+    return streamZhipu(opts)
+  }
   throw new Error(`Unknown provider: ${PROVIDER}`)
 }

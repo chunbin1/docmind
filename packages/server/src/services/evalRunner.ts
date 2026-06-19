@@ -15,12 +15,13 @@ import {
 import { scoreContextRecall, scoreLLMMetrics, ZERO_USAGE } from './evalJudge.js'
 import type { TokenUsage } from './evalJudge.js'
 import { throttledCompletion } from './llmThrottle.js'
+import { logLlmRequest } from '../llmLog.js'
+import { RAG } from './ragConfig.js'
 import type { EvalRun, EvalConfigSnapshot, EvalCase } from '../types.js'
 
 const MODEL = process.env.ZHIPU_MODEL ?? 'glm-4.7'
 const EMBED_MODEL = process.env.ZHIPU_EMBEDDING_MODEL ?? 'embedding-3'
 const JUDGE_MODEL = process.env.ZHIPU_JUDGE_MODEL ?? 'glm-4.7'
-const TOP_K = 3
 
 function getClient(): OpenAI {
   return new OpenAI({
@@ -43,6 +44,12 @@ async function generateAnswer(
     'You are a helpful assistant. Answer concisely and clearly based on the provided document references.',
     docSection,
   ].filter(Boolean).join('\n\n')
+
+  logLlmRequest('eval/answer', {
+    model: MODEL,
+    system,
+    messages: [{ role: 'user', content: question }],
+  })
 
   try {
     const completion = await throttledCompletion(() =>
@@ -78,7 +85,7 @@ async function evaluateCase(runId: string, docId: string, c: EvalCase): Promise<
   answer_relevancy: number
   total_tokens: number
 }> {
-  const retrievedChunks = await searchChunks(c.question, [docId], TOP_K)
+  const retrievedChunks = await searchChunks(c.question, [docId]) // 距离阈值 + 动态 k
   const retrievedIds = retrievedChunks.map(rc => `${docId}_chunk_${rc.chunk_index}`)
   const { answer, usage: genUsage } = await generateAnswer(c.question, retrievedChunks)
 
@@ -214,7 +221,9 @@ export async function runEvaluation(testSetId: string): Promise<EvalRun> {
   const config: EvalConfigSnapshot = {
     chunkSize: 500,
     overlap: 50,
-    topK: TOP_K,
+    topK: RAG.maxK, // 动态 k 的上限
+    distanceThreshold: RAG.distanceThreshold,
+    minK: RAG.minK,
     model: MODEL,
     embedModel: EMBED_MODEL,
     judgeModel: JUDGE_MODEL,
