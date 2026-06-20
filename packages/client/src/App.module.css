@@ -125,6 +125,69 @@
   background: #22c55e;
 }
 
+/* ── User badge / quota ── */
+.userBox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quota {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--purple);
+  background: var(--gray-50, #f4f3ff);
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--gray-200);
+}
+
+.userName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+
+.logoutBtn {
+  font-size: 12px;
+  color: var(--gray-500, #6b7280);
+  background: none;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.logoutBtn:hover {
+  background: var(--gray-50, #f3f4f6);
+}
+
+.authLoading {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-400);
+  font-size: 14px;
+}
+
+.limitBar {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #b45309;
+  background: #fffbeb;
+  border-top: 1px solid #fde68a;
+  text-align: center;
+}
+
 /* ── Messages ── */
 .messages {
   flex: 1;

@@ -1,13 +1,16 @@
 import { useEffect, useRef } from 'react'
 import { useChat } from './hooks/useChat'
 import { useDocuments } from './hooks/useDocuments'
+import { useAuth } from './hooks/useAuth'
 import { Message } from './components/Message'
 import { ChatInput } from './components/ChatInput'
 import { MemoryPanel } from './components/MemoryPanel'
 import { EvalPanel } from './components/EvalPanel'
+import { LoginGate } from './components/LoginGate'
 import styles from './App.module.css'
 
 export default function App() {
+  const auth = useAuth()
   const {
     messages,
     streaming,
@@ -23,6 +26,16 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  if (auth.loading) {
+    return <div className={styles.authLoading}>加载中…</div>
+  }
+  if (!auth.user) {
+    return <LoginGate onLogin={auth.login} />
+  }
+
+  const { user } = auth
+  const limitReached = !user.unlimited && (user.remaining ?? 0) <= 0
 
   return (
     <div className={styles.layout}>
@@ -53,7 +66,18 @@ export default function App() {
                 : `${messages.filter(m => m.role === 'user').length} 条对话`}
             </p>
           </div>
-          <div className={styles.statusDot} title="服务正常" />
+          <div className={styles.userBox}>
+            <span className={styles.quota} title="剩余可发送消息数">
+              {user.unlimited ? '∞ 无限' : `剩余 ${user.remaining ?? 0}/${user.limit}`}
+            </span>
+            {user.avatarUrl && (
+              <img className={styles.avatar} src={user.avatarUrl} alt={user.username} />
+            )}
+            <span className={styles.userName}>{user.username}</span>
+            <button className={styles.logoutBtn} onClick={() => void auth.logout()}>
+              退出
+            </button>
+          </div>
         </header>
 
         <div className={styles.messages}>
@@ -99,10 +123,16 @@ export default function App() {
         {compacting && (
           <div className={styles.compactingBar}>⚡ 正在压缩历史对话...</div>
         )}
+        {limitReached && (
+          <div className={styles.limitBar}>
+            已达每位用户 {user.limit} 条消息上限，如需继续请联系管理员开通无限调用。
+          </div>
+        )}
         <ChatInput
           onSend={(msg, docIds) => void sendMessage(msg, undefined, docIds)}
           onStop={stopStreaming}
           streaming={streaming || compacting}
+          disabled={limitReached}
           documents={docs.documents}
           attachedIds={docs.attachedIds}
           uploading={docs.uploading}

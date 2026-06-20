@@ -8,6 +8,8 @@ import type { LLMMessage, MemoryNote, ParsedCompact, DocumentChunk } from '../ty
 import { searchChunks, isDocVectorAvailable } from '../services/documentVector.js'
 import { getWeather } from '../tools/weather.js'
 import { logLlmRequest } from '../llmLog.js'
+import { currentUser } from './auth.js'
+import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
@@ -169,11 +171,24 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok', provider: PROVIDER }))
 
   app.post<{ Body: StreamBody }>('/chat/stream', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    if (!canSend(user)) {
+      return reply.status(403).send({
+        error: 'message_limit_reached',
+        limit: MESSAGE_LIMIT,
+        used: user.message_count,
+      })
+    }
+
     const { message, history = [], systemPrompt, docIds = [] } = request.body
 
     if (!message?.trim()) {
       return reply.status(400).send({ error: 'message is required' })
     }
+
+    // Count this send against the user's quota (no-op for unlimited users via canSend).
+    incrementMessageCount(user.id)
 
     const [relevantNotes, relevantChunks, toolSection] = await Promise.all([
       getRelevantNotes(message),
@@ -223,6 +238,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post<{ Body: CompactBody }>('/chat/compact', async (request, reply) => {
+    if (!currentUser(request)) return reply.status(401).send({ error: 'unauthorized' })
     const { messages } = request.body
     if (!Array.isArray(messages) || messages.length === 0) {
       return reply.status(400).send({ error: 'messages is required' })
@@ -251,6 +267,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post<{ Body: NudgeBody }>('/chat/nudge', async (request, reply) => {
+    if (!currentUser(request)) return reply.status(401).send({ error: 'unauthorized' })
     const { messages } = request.body
     if (!Array.isArray(messages) || messages.length === 0) {
       return reply.status(400).send({ error: 'messages required' })
