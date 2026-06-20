@@ -4,20 +4,25 @@ import { parsePdf, chunkText } from '../services/pdfParser.js'
 import { saveDocument, getAllDocuments, deleteDocument, getDocument } from '../services/documentStore.js'
 import { upsertChunks, deleteByDocId, isDocVectorAvailable } from '../services/documentVector.js'
 import type { ParseError } from '../services/pdfParser.js'
+import { currentUser } from './auth.js'
 
 function isParseError(e: unknown): e is ParseError {
   return typeof e === 'object' && e !== null && 'code' in e
 }
 
 export const documentRoutes: FastifyPluginAsync = async (app) => {
-  // GET /api/documents — list all documents
-  app.get('/documents', async () => {
-    const documents = getAllDocuments()
+  // GET /api/documents — list the current user's documents
+  app.get('/documents', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    const documents = getAllDocuments(user.id)
     return { documents }
   })
 
   // POST /api/documents — upload a PDF
   app.post('/documents', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
     const data = await request.file()
     if (!data) {
       return reply.status(400).send({ error: 'No file uploaded' })
@@ -42,14 +47,14 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const chunks = chunkText(parseResult.text)
-    const doc = saveDocument({
+    const doc = saveDocument(user.id, {
       filename: data.filename,
       size_bytes: buffer.length,
       chunk_count: chunks.length,
     })
 
     if (isDocVectorAvailable()) {
-      upsertChunks(doc.id, doc.filename, chunks).catch((err: unknown) => {
+      upsertChunks(user.id, doc.id, doc.filename, chunks).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
         app.log.warn(`[documents] upsertChunks failed for ${doc.id}: ${msg}`)
       })
@@ -60,14 +65,16 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /api/documents/:id
   app.delete<{ Params: { id: string } }>('/documents/:id', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
     const { id } = request.params
-    const doc = getDocument(id)
+    const doc = getDocument(user.id, id)
     if (!doc) {
       return reply.status(404).send({ error: 'Document not found' })
     }
 
     await deleteByDocId(id)
-    deleteDocument(id)
+    deleteDocument(user.id, id)
 
     return { success: true }
   })

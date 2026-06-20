@@ -111,23 +111,24 @@ function trimHistoryByTokens(history: LLMMessage[], maxTokens = 6000): LLMMessag
   return [...pinned, ...normal.slice(cutIndex)]
 }
 
-async function getRelevantNotes(query: string, topK = 3): Promise<MemoryNote[]> {
+async function getRelevantNotes(userId: string, query: string, topK = 3): Promise<MemoryNote[]> {
   if (isVectorAvailable()) {
-    const results = await semanticSearch(query, topK)
+    const results = await semanticSearch(userId, query, topK)
     if (results.length > 0) return results
   }
-  return searchFts(query, topK)
+  return searchFts(userId, query, topK)
 }
 
-async function getRelevantChunks(query: string, docIds: string[]): Promise<DocumentChunk[]> {
+async function getRelevantChunks(userId: string, query: string, docIds: string[]): Promise<DocumentChunk[]> {
   if (!docIds.length || !isDocVectorAvailable()) return []
-  return searchChunks(query, docIds) // 距离阈值 + 动态 k（见 ragConfig）
+  // undefined maxK keeps the RAG.maxK default; userId limits retrieval to this user's chunks.
+  return searchChunks(query, docIds, undefined, userId)
 }
 
-function persistFacts(facts: string[], source: string): MemoryNote[] {
-  const saved = addNotes(facts, source)
+function persistFacts(userId: string, facts: string[], source: string): MemoryNote[] {
+  const saved = addNotes(userId, facts, source)
   for (const note of saved) {
-    upsertNote(note).catch(() => {})
+    upsertNote(userId, note).catch(() => {})
   }
   return saved
 }
@@ -191,8 +192,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     incrementMessageCount(user.id)
 
     const [relevantNotes, relevantChunks, toolSection] = await Promise.all([
-      getRelevantNotes(message),
-      getRelevantChunks(message, docIds),
+      getRelevantNotes(user.id, message),
+      getRelevantChunks(user.id, message, docIds),
       runToolsIfNeeded(message, history),
     ])
 
@@ -238,7 +239,8 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post<{ Body: CompactBody }>('/chat/compact', async (request, reply) => {
-    if (!currentUser(request)) return reply.status(401).send({ error: 'unauthorized' })
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
     const { messages } = request.body
     if (!Array.isArray(messages) || messages.length === 0) {
       return reply.status(400).send({ error: 'messages is required' })
@@ -261,13 +263,14 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     for await (const text of stream) rawOutput += text
 
     const { summary, facts } = parseCompactOutput(rawOutput)
-    if (facts.length > 0) persistFacts(facts, 'compact')
+    if (facts.length > 0) persistFacts(user.id, facts, 'compact')
 
     return { summary, facts }
   })
 
   app.post<{ Body: NudgeBody }>('/chat/nudge', async (request, reply) => {
-    if (!currentUser(request)) return reply.status(401).send({ error: 'unauthorized' })
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
     const { messages } = request.body
     if (!Array.isArray(messages) || messages.length === 0) {
       return reply.status(400).send({ error: 'messages required' })
@@ -301,7 +304,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       .filter(l => l.length > 3 && l.length <= 200)
       .slice(0, 5)
 
-    if (facts.length > 0) persistFacts(facts, 'nudge')
+    if (facts.length > 0) persistFacts(user.id, facts, 'nudge')
     return { extracted: facts.length }
   })
 }

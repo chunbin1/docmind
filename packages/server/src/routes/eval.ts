@@ -1,5 +1,5 @@
 // packages/server/src/routes/eval.ts
-import type { FastifyPluginAsync } from 'fastify'
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
 import {
   getAllTestSets,
   getTestSet,
@@ -11,6 +11,8 @@ import {
 } from '../services/evalStore.js'
 import { generateTestSet } from '../services/evalGenerator.js'
 import { runEvaluation, resumeEvaluation } from '../services/evalRunner.js'
+import { currentUser } from './auth.js'
+import type { User } from '../services/userStore.js'
 
 interface GenerateBody { docId: string }
 interface RunBody { testSetId: string }
@@ -19,54 +21,81 @@ interface RunBody { testSetId: string }
 // fall back to Anthropic because the model + endpoint are hardcoded throughout the
 // eval services. Surface a clear 503 instead of letting the OpenAI client fail
 // with an unauthenticated error.
-function requireZhipu(reply: import('fastify').FastifyReply): boolean {
+function requireZhipu(reply: FastifyReply): boolean {
   if (process.env.ZHIPU_API_KEY) return true
   void reply.code(503).send({ error: 'Eval requires ZHIPU_API_KEY' })
   return false
 }
 
+// Eval is admin-only. Returns the user only when logged in AND an admin,
+// otherwise replies 401/403 and returns null.
+function requireAdmin(request: FastifyRequest, reply: FastifyReply): User | null {
+  const user = currentUser(request)
+  if (!user) {
+    void reply.code(401).send({ error: 'unauthorized' })
+    return null
+  }
+  if (user.is_admin !== 1) {
+    void reply.code(403).send({ error: 'forbidden' })
+    return null
+  }
+  return user
+}
+
 export const evalRoutes: FastifyPluginAsync = async (app) => {
   // 生成测试集（阻塞式，可能耗时 30s+）
   app.post<{ Body: GenerateBody }>('/eval/generate', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
     if (!requireZhipu(reply)) return
     const { docId } = req.body
     if (!docId) return reply.code(400).send({ error: 'docId required' })
     try {
-      const testSet = await generateTestSet(docId)
-      return testSet
+      return await generateTestSet(user.id, docId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return reply.code(500).send({ error: msg })
     }
   })
 
-  // 列出所有测试集
-  app.get('/eval/test-sets', async () => ({
-    testSets: getAllTestSets(),
-  }))
+  // 列出当前用户的测试集
+  app.get('/eval/test-sets', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
+    return { testSets: getAllTestSets(user.id) }
+  })
 
   // 测试集详情（含所有 cases）
   app.get<{ Params: { id: string } }>('/eval/test-sets/:id', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
     const testSet = getTestSet(req.params.id)
-    if (!testSet) return reply.code(404).send({ error: 'test set not found' })
+    if (!testSet || testSet.user_id !== user.id) return reply.code(404).send({ error: 'test set not found' })
     const cases = getCasesByTestSet(testSet.id)
     return { testSet, cases }
   })
 
   // 删除测试集（级联删除 cases）
-  app.delete<{ Params: { id: string } }>('/eval/test-sets/:id', async (req) => {
-    deleteTestSet(req.params.id)
+  app.delete<{ Params: { id: string } }>('/eval/test-sets/:id', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
+    const testSet = getTestSet(req.params.id)
+    if (!testSet || testSet.user_id !== user.id) return reply.code(404).send({ error: 'test set not found' })
+    deleteTestSet(testSet.id)
     return { ok: true }
   })
 
   // 触发一次评估（阻塞式，可能耗时几分钟）
   app.post<{ Body: RunBody }>('/eval/runs', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
     if (!requireZhipu(reply)) return
     const { testSetId } = req.body
     if (!testSetId) return reply.code(400).send({ error: 'testSetId required' })
+    const testSet = getTestSet(testSetId)
+    if (!testSet || testSet.user_id !== user.id) return reply.code(404).send({ error: 'test set not found' })
     try {
-      const run = await runEvaluation(testSetId)
-      return run
+      return await runEvaluation(testSetId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return reply.code(500).send({ error: msg })
@@ -75,25 +104,34 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 续跑：保留已成功的 case，只重跑失败/未评的（阻塞式）
   app.post<{ Params: { id: string } }>('/eval/runs/:id/resume', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
     if (!requireZhipu(reply)) return
+    const run = getRun(req.params.id)
+    const ts = run && getTestSet(run.test_set_id)
+    if (!run || !ts || ts.user_id !== user.id) return reply.code(404).send({ error: 'run not found' })
     try {
-      const run = await resumeEvaluation(req.params.id)
-      return run
+      return await resumeEvaluation(req.params.id)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return reply.code(500).send({ error: msg })
     }
   })
 
-  // 列出所有运行
-  app.get('/eval/runs', async () => ({
-    runs: getAllRuns(),
-  }))
+  // 列出当前用户的运行
+  app.get('/eval/runs', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
+    return { runs: getAllRuns(user.id) }
+  })
 
   // 运行详情（含所有 results）
   app.get<{ Params: { id: string } }>('/eval/runs/:id', async (req, reply) => {
+    const user = requireAdmin(req, reply)
+    if (!user) return
     const run = getRun(req.params.id)
-    if (!run) return reply.code(404).send({ error: 'run not found' })
+    const ts = run && getTestSet(run.test_set_id)
+    if (!run || !ts || ts.user_id !== user.id) return reply.code(404).send({ error: 'run not found' })
     const results = getResultsWithCaseByRun(run.id)
     return { run, results }
   })

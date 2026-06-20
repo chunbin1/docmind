@@ -26,7 +26,8 @@ export function initEvalTables(db: DB): void {
       doc_id      TEXT NOT NULL,
       name        TEXT NOT NULL,
       case_count  INTEGER NOT NULL,
-      created_at  TEXT NOT NULL
+      created_at  TEXT NOT NULL,
+      user_id     TEXT
     );
 
     CREATE TABLE IF NOT EXISTS eval_cases (
@@ -78,6 +79,8 @@ export function initEvalTables(db: DB): void {
   migrateAddColumn(db, 'eval_results', 'prompt_tokens', 'INTEGER')
   migrateAddColumn(db, 'eval_results', 'completion_tokens', 'INTEGER')
   migrateAddColumn(db, 'eval_results', 'total_tokens', 'INTEGER')
+  // Per-user isolation: scope test sets by owner (old rows keep NULL user_id).
+  migrateAddColumn(db, 'eval_test_sets', 'user_id', 'TEXT')
   // Mark any runs left in 'running' state from a previous server lifetime as failed,
   // so they don't get stuck forever (the in-process loop that owned them is gone).
   db.prepare(`
@@ -98,7 +101,7 @@ function genId(prefix: string): string {
 
 // === Test Sets ===
 
-export function createTestSet(opts: {
+export function createTestSet(userId: string, opts: {
   doc_id: string
   name: string
   case_count: number
@@ -106,15 +109,15 @@ export function createTestSet(opts: {
   const id = genId('ts')
   const created_at = new Date().toISOString()
   db().prepare(
-    'INSERT INTO eval_test_sets (id, doc_id, name, case_count, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(id, opts.doc_id, opts.name, opts.case_count, created_at)
-  return { id, ...opts, created_at }
+    'INSERT INTO eval_test_sets (id, doc_id, name, case_count, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(id, opts.doc_id, opts.name, opts.case_count, created_at, userId)
+  return { id, ...opts, created_at, user_id: userId }
 }
 
-export function getAllTestSets(): EvalTestSet[] {
+export function getAllTestSets(userId: string): EvalTestSet[] {
   return db()
-    .prepare('SELECT * FROM eval_test_sets ORDER BY created_at DESC')
-    .all() as EvalTestSet[]
+    .prepare('SELECT * FROM eval_test_sets WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId) as EvalTestSet[]
 }
 
 export function getTestSet(id: string): EvalTestSet | null {
@@ -213,10 +216,15 @@ export function markRunFailed(id: string): void {
     .run('failed', new Date().toISOString(), id)
 }
 
-export function getAllRuns(): EvalRun[] {
+export function getAllRuns(userId: string): EvalRun[] {
   return db()
-    .prepare('SELECT * FROM eval_runs ORDER BY started_at DESC')
-    .all() as EvalRun[]
+    .prepare(`
+      SELECT r.* FROM eval_runs r
+      JOIN eval_test_sets ts ON ts.id = r.test_set_id
+      WHERE ts.user_id = ?
+      ORDER BY r.started_at DESC
+    `)
+    .all(userId) as EvalRun[]
 }
 
 export function getRun(id: string): EvalRun | null {

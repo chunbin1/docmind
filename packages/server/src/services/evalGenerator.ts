@@ -64,8 +64,8 @@ function parseGenerated(raw: string): GeneratedQA[] {
 /**
  * 给指定文档生成测试集。会调 LLM 对每个 chunk 出题。
  */
-export async function generateTestSet(docId: string): Promise<EvalTestSet> {
-  const doc = getDocument(docId)
+export async function generateTestSet(userId: string, docId: string): Promise<EvalTestSet> {
+  const doc = getDocument(userId, docId)
   if (!doc) throw new Error(`document not found: ${docId}`)
 
   const chunks = await getAllChunksByDoc(docId)
@@ -110,10 +110,10 @@ export async function generateTestSet(docId: string): Promise<EvalTestSet> {
   if (allCases.length === 0) throw new Error('No cases generated — all LLM calls failed')
 
   // 自动命名：<filename>-v<N>
-  const existingCount = getAllTestSets().filter(ts => ts.doc_id === docId).length
+  const existingCount = getAllTestSets(userId).filter(ts => ts.doc_id === docId).length
   const name = `${doc.filename}-v${existingCount + 1}`
 
-  const testSet = createTestSet({
+  const testSet = createTestSet(userId, {
     doc_id: docId,
     name,
     case_count: allCases.length,
