@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { EvalTestSet, EvalRun, EvalCase, EvalResultWithCase } from '../types'
 
-const API = 'http://localhost:3001/api'
+const API = '/api'
 
 export interface UseEvalReturn {
   testSets: EvalTestSet[]

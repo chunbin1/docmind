@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Document } from '../types'
 
-const API = 'http://localhost:3001/api'
+const API = '/api'
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 
 export interface UseDocumentsReturn {

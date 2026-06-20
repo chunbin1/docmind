@@ -55,7 +55,7 @@ cp packages/server/.env.example packages/server/.env
 # 编辑 .env，填入 ANTHROPIC_API_KEY 或 ZHIPU_API_KEY
 
 # 4. 启动 ChromaDB（可选，用于语义记忆检索，需要 Docker）
-docker compose up chroma -d
+docker compose -f docker-compose.dev.yml up chroma -d
 
 # 5. 启动开发服务器（两个终端分别运行）
 npm run dev:server   # http://localhost:3001
@@ -68,7 +68,7 @@ npm run dev:client   # http://localhost:5173
 cp packages/server/.env.example packages/server/.env
 # 填入 API Key
 
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 # 访问 http://localhost:5173
 ```
 
@@ -105,7 +105,8 @@ docmind/
 │           ├── Message.jsx
 │           ├── ChatInput.jsx
 │           └── MemoryPanel.jsx    # 记忆管理面板
-├── docker-compose.yml
+├── docker-compose.dev.yml   # 本地开发
+├── docker-compose.prod.yml  # 远程部署
 └── .github/workflows/ci.yml
 ```
 
@@ -189,7 +190,7 @@ cp packages/server/.env.example packages/server/.env
 # Edit .env and fill in ANTHROPIC_API_KEY or ZHIPU_API_KEY
 
 # 4. Start ChromaDB (optional, for semantic memory, requires Docker)
-docker compose up chroma -d
+docker compose -f docker-compose.dev.yml up chroma -d
 
 # 5. Start dev servers (in two separate terminals)
 npm run dev:server   # http://localhost:3001
@@ -202,7 +203,7 @@ npm run dev:client   # http://localhost:5173
 cp packages/server/.env.example packages/server/.env
 # Fill in your API key
 
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 # Open http://localhost:5173
 ```
 
