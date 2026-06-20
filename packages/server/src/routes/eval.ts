@@ -27,10 +27,16 @@ function requireZhipu(reply: FastifyReply): boolean {
   return false
 }
 
-function requireUser(request: FastifyRequest, reply: FastifyReply): User | null {
+// Eval is admin-only. Returns the user only when logged in AND an admin,
+// otherwise replies 401/403 and returns null.
+function requireAdmin(request: FastifyRequest, reply: FastifyReply): User | null {
   const user = currentUser(request)
   if (!user) {
     void reply.code(401).send({ error: 'unauthorized' })
+    return null
+  }
+  if (user.is_admin !== 1) {
+    void reply.code(403).send({ error: 'forbidden' })
     return null
   }
   return user
@@ -39,7 +45,7 @@ function requireUser(request: FastifyRequest, reply: FastifyReply): User | null 
 export const evalRoutes: FastifyPluginAsync = async (app) => {
   // 生成测试集（阻塞式，可能耗时 30s+）
   app.post<{ Body: GenerateBody }>('/eval/generate', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     if (!requireZhipu(reply)) return
     const { docId } = req.body
@@ -54,14 +60,14 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 列出当前用户的测试集
   app.get('/eval/test-sets', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     return { testSets: getAllTestSets(user.id) }
   })
 
   // 测试集详情（含所有 cases）
   app.get<{ Params: { id: string } }>('/eval/test-sets/:id', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     const testSet = getTestSet(req.params.id)
     if (!testSet || testSet.user_id !== user.id) return reply.code(404).send({ error: 'test set not found' })
@@ -71,7 +77,7 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 删除测试集（级联删除 cases）
   app.delete<{ Params: { id: string } }>('/eval/test-sets/:id', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     const testSet = getTestSet(req.params.id)
     if (!testSet || testSet.user_id !== user.id) return reply.code(404).send({ error: 'test set not found' })
@@ -81,7 +87,7 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 触发一次评估（阻塞式，可能耗时几分钟）
   app.post<{ Body: RunBody }>('/eval/runs', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     if (!requireZhipu(reply)) return
     const { testSetId } = req.body
@@ -98,7 +104,7 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 续跑：保留已成功的 case，只重跑失败/未评的（阻塞式）
   app.post<{ Params: { id: string } }>('/eval/runs/:id/resume', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     if (!requireZhipu(reply)) return
     const run = getRun(req.params.id)
@@ -114,14 +120,14 @@ export const evalRoutes: FastifyPluginAsync = async (app) => {
 
   // 列出当前用户的运行
   app.get('/eval/runs', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     return { runs: getAllRuns(user.id) }
   })
 
   // 运行详情（含所有 results）
   app.get<{ Params: { id: string } }>('/eval/runs/:id', async (req, reply) => {
-    const user = requireUser(req, reply)
+    const user = requireAdmin(req, reply)
     if (!user) return
     const run = getRun(req.params.id)
     const ts = run && getTestSet(run.test_set_id)
