@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { ChatMessage, UseChatReturn } from '../types'
 
-const STORAGE_KEY = 'docmind:chat:messages'
 const COMPACT_THRESHOLD = 12000
 const COMPACT_KEEP_RECENT = 6
 const NUDGE_INTERVAL = 10
@@ -18,38 +17,55 @@ function totalTokens(messages: ChatMessage[]): number {
   return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
 }
 
-export function useChat(): UseChatReturn {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      return saved ? (JSON.parse(saved) as ChatMessage[]) : []
-    } catch {
-      return []
-    }
-  })
+export function useChat(userId: string | null): UseChatReturn {
+  // Chat history is stored per account so users on the same browser never see
+  // each other's conversations.
+  const storageKey = userId ? `docmind:chat:${userId}` : null
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [compacting, setCompacting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevKeyRef = useRef<string | null>(null)
   const turnCountRef = useRef(0)
   const messagesRef = useRef<ChatMessage[]>(messages)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
 
+  // Load this account's history when the user changes (empty on logout).
+  // One-time migration: the first account to log in on this browser adopts the
+  // pre-auth global history, then it's retired.
   useEffect(() => {
-    if (streaming) return
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-50)))
-      } catch {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-20)))
+    if (!storageKey) { setMessages([]); return }
+    try {
+      let raw = localStorage.getItem(storageKey)
+      if (!raw) {
+        const legacy = localStorage.getItem('docmind:chat:messages')
+        if (legacy) {
+          localStorage.setItem(storageKey, legacy)
+          localStorage.removeItem('docmind:chat:messages')
+          raw = legacy
+        }
       }
-    }, 500)
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      setMessages(raw ? (JSON.parse(raw) as ChatMessage[]) : [])
+    } catch {
+      setMessages([])
     }
-  }, [messages, streaming])
+  }, [storageKey])
+
+  // Persist immediately (no debounce) so a refresh right after an answer can't
+  // lose it. Skip while streaming, when logged out, and on the render right
+  // after an account switch (messages still hold the previous account's state
+  // until the load effect above replaces them — writing here would clobber it).
+  useEffect(() => {
+    const keyChanged = prevKeyRef.current !== storageKey
+    prevKeyRef.current = storageKey
+    if (streaming || !storageKey || keyChanged) return
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-50)))
+    } catch {
+      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-20)))
+    }
+  }, [messages, streaming, storageKey])
 
   const appendToLast = (text: string): void => {
     setMessages(prev => {
@@ -239,8 +255,8 @@ export function useChat(): UseChatReturn {
 
   const clearMessages = useCallback((): void => {
     setMessages([])
-    localStorage.removeItem(STORAGE_KEY)
-  }, [])
+    if (storageKey) localStorage.removeItem(storageKey)
+  }, [storageKey])
 
   return { messages, streaming, compacting, sendMessage, stopStreaming, clearMessages, togglePin }
 }

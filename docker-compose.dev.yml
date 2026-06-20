@@ -22,6 +22,7 @@ services:
     depends_on:
       - chroma
     volumes:
+      - server_data:/app/data
       - uploads:/app/uploads
 
   client:
@@ -35,4 +36,5 @@ services:
 
 volumes:
   chroma_data:
+  server_data:
   uploads:

@@ -71,6 +71,7 @@ export interface EvalTestSet {
   name: string
   case_count: number  // denormalized count of related eval_cases rows
   created_at: string
+  user_id?: string    // owner; scopes test sets per user
 }
 
 export interface EvalCase {

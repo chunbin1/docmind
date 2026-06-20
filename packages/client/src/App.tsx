@@ -19,7 +19,7 @@ export default function App() {
     stopStreaming,
     clearMessages,
     togglePin,
-  } = useChat()
+  } = useChat(auth.user?.id ?? null)
   const docs = useDocuments()
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -47,7 +47,7 @@ export default function App() {
 
         <MemoryPanel />
 
-        <EvalPanel documents={docs.documents} />
+        {user.isAdmin && <EvalPanel documents={docs.documents} />}
 
         <div className={styles.sideBottom}>
           <button className={styles.clearBtn} onClick={clearMessages}>

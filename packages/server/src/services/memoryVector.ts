@@ -36,7 +36,7 @@ export function isVectorAvailable(): boolean {
   return _available
 }
 
-export async function upsertNote(note: MemoryNote): Promise<void> {
+export async function upsertNote(userId: string, note: MemoryNote): Promise<void> {
   if (!_available || !_collection) return
   try {
     const vector = await embed(note.content)
@@ -44,7 +44,7 @@ export async function upsertNote(note: MemoryNote): Promise<void> {
       ids: [note.id],
       embeddings: [vector],
       documents: [note.content],
-      metadatas: [{ source: note.source, created_at: note.created_at }],
+      metadatas: [{ source: note.source, created_at: note.created_at, user_id: userId }],
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -62,13 +62,14 @@ export async function deleteNoteVector(id: string): Promise<void> {
   }
 }
 
-export async function semanticSearch(query: string, topK = 3): Promise<MemoryNote[]> {
+export async function semanticSearch(userId: string, query: string, topK = 3): Promise<MemoryNote[]> {
   if (!_available || !_collection || !query?.trim()) return []
   try {
     const vector = await embed(query)
     const results = await _collection.query({
       queryEmbeddings: [vector],
       nResults: topK,
+      where: { user_id: { $eq: userId } },
     })
     const ids = results.ids[0] ?? []
     const docs = results.documents[0] ?? []
@@ -86,11 +87,11 @@ export async function semanticSearch(query: string, topK = 3): Promise<MemoryNot
   }
 }
 
-export async function clearCollection(): Promise<void> {
-  if (!_available || !_client) return
+/** Delete only the requesting user's memory vectors (not the whole collection). */
+export async function clearCollection(userId: string): Promise<void> {
+  if (!_available || !_collection) return
   try {
-    await _client.deleteCollection({ name: COLLECTION_NAME })
-    _collection = await _client.getOrCreateCollection({ name: COLLECTION_NAME })
+    await _collection.delete({ where: { user_id: { $eq: userId } } })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`[memoryVector] clearCollection failed: ${msg}`)

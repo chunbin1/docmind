@@ -29,6 +29,7 @@ const DEV_USER: User = {
   avatar_url: null,
   message_count: 0,
   unlimited: 1,
+  is_admin: 1,
   created_at: '',
 }
 
@@ -57,6 +58,7 @@ function publicUser(user: User) {
     messageCount: user.message_count,
     limit: MESSAGE_LIMIT,
     unlimited: user.unlimited === 1,
+    isAdmin: user.is_admin === 1,
     remaining: remaining(user),
   }
 }

@@ -7,6 +7,7 @@ export interface AuthUser {
   messageCount: number
   limit: number
   unlimited: boolean
+  isAdmin: boolean
   /** null when unlimited */
   remaining: number | null
 }

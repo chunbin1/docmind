@@ -24,6 +24,7 @@ export function initDb(): DB {
       content    TEXT NOT NULL,
       source     TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      user_id    TEXT,
       chroma_id  TEXT
     );
 
@@ -45,6 +46,13 @@ export function initDb(): DB {
     END;
   `)
 
+  // Migrate older DBs created before per-user isolation (rows keep NULL user_id
+  // and become invisible to every user, which is the intended fresh-start behaviour).
+  const cols = _db.prepare('PRAGMA table_info(memory_notes)').all() as Array<{ name: string }>
+  if (!cols.some(c => c.name === 'user_id')) {
+    _db.exec('ALTER TABLE memory_notes ADD COLUMN user_id TEXT')
+  }
+
   return _db
 }
 
@@ -57,7 +65,7 @@ function genId(): string {
   return `mem_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`
 }
 
-export function addNote(content: string, source = 'manual'): MemoryNote | null {
+export function addNote(userId: string, content: string, source = 'manual'): MemoryNote | null {
   const trimmed = String(content).trim().slice(0, MAX_NOTE_CHARS)
   if (!trimmed) return null
 
@@ -65,17 +73,18 @@ export function addNote(content: string, source = 'manual'): MemoryNote | null {
   const created_at = new Date().toISOString()
 
   db().prepare(
-    'INSERT INTO memory_notes (id, content, source, created_at) VALUES (?, ?, ?, ?)',
-  ).run(id, trimmed, source, created_at)
+    'INSERT INTO memory_notes (id, content, source, created_at, user_id) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, trimmed, source, created_at, userId)
 
+  // Eviction is per-user: keep at most MAX_NOTES notes for this user.
   const countRow = db()
-    .prepare('SELECT COUNT(*) as c FROM memory_notes')
-    .get() as { c: number }
+    .prepare('SELECT COUNT(*) as c FROM memory_notes WHERE user_id = ?')
+    .get(userId) as { c: number }
 
   if (countRow.c > MAX_NOTES) {
     const oldest = db()
-      .prepare('SELECT id FROM memory_notes ORDER BY created_at ASC LIMIT ?')
-      .all(countRow.c - MAX_NOTES) as { id: string }[]
+      .prepare('SELECT id FROM memory_notes WHERE user_id = ? ORDER BY created_at ASC LIMIT ?')
+      .all(userId, countRow.c - MAX_NOTES) as { id: string }[]
     const del = db().prepare('DELETE FROM memory_notes WHERE id = ?')
     for (const row of oldest) del.run(row.id)
   }
@@ -83,28 +92,29 @@ export function addNote(content: string, source = 'manual'): MemoryNote | null {
   return { id, content: trimmed, source, created_at }
 }
 
-export function addNotes(contents: string[], source = 'manual'): MemoryNote[] {
+export function addNotes(userId: string, contents: string[], source = 'manual'): MemoryNote[] {
   const insert = db().transaction((items: string[]) =>
-    items.map(c => addNote(c, source)).filter((n): n is MemoryNote => n !== null),
+    items.map(c => addNote(userId, c, source)).filter((n): n is MemoryNote => n !== null),
   )
   return insert(contents)
 }
 
-export function deleteNote(id: string): void {
-  db().prepare('DELETE FROM memory_notes WHERE id = ?').run(id)
+/** Delete a note only if it belongs to the requesting user. */
+export function deleteNote(userId: string, id: string): void {
+  db().prepare('DELETE FROM memory_notes WHERE id = ? AND user_id = ?').run(id, userId)
 }
 
-export function clearAll(): void {
-  db().prepare('DELETE FROM memory_notes').run()
+export function clearAll(userId: string): void {
+  db().prepare('DELETE FROM memory_notes WHERE user_id = ?').run(userId)
 }
 
-export function getAllNotes(): MemoryNote[] {
+export function getAllNotes(userId: string): MemoryNote[] {
   return db()
-    .prepare('SELECT * FROM memory_notes ORDER BY created_at DESC')
-    .all() as MemoryNote[]
+    .prepare('SELECT * FROM memory_notes WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId) as MemoryNote[]
 }
 
-export function searchFts(query: string, limit = 5): MemoryNote[] {
+export function searchFts(userId: string, query: string, limit = 5): MemoryNote[] {
   if (!query?.trim()) return []
   const safe = query.replace(/["*()]/g, ' ').trim()
   if (!safe) return []
@@ -113,19 +123,19 @@ export function searchFts(query: string, limit = 5): MemoryNote[] {
       SELECT n.*
       FROM memory_notes n
       JOIN memory_notes_fts f ON n.rowid = f.rowid
-      WHERE memory_notes_fts MATCH ?
+      WHERE memory_notes_fts MATCH ? AND n.user_id = ?
       ORDER BY rank
       LIMIT ?
-    `).all(safe, limit) as MemoryNote[]
+    `).all(safe, userId, limit) as MemoryNote[]
   } catch {
     return []
   }
 }
 
-export function getTotalChars(): number {
+export function getTotalChars(userId: string): number {
   const row = db()
-    .prepare("SELECT COALESCE(SUM(LENGTH(content)), 0) as total FROM memory_notes")
-    .get() as { total: number }
+    .prepare('SELECT COALESCE(SUM(LENGTH(content)), 0) as total FROM memory_notes WHERE user_id = ?')
+    .get(userId) as { total: number }
   return row.total
 }
 

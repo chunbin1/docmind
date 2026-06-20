@@ -16,6 +16,12 @@ export interface User {
    *   UPDATE users SET unlimited = 1 WHERE username = '...';
    */
   unlimited: number
+  /**
+   * 0 = normal user, 1 = admin (can see the eval module).
+   * Like `unlimited`, intentionally has NO write API — flip it in the DB only:
+   *   UPDATE users SET is_admin = 1 WHERE username = '...';
+   */
+  is_admin: number
   created_at: string
 }
 
@@ -31,9 +37,15 @@ export function initUserTables(db: DB): void {
       avatar_url    TEXT,
       message_count INTEGER NOT NULL DEFAULT 0,
       unlimited     INTEGER NOT NULL DEFAULT 0,
+      is_admin      INTEGER NOT NULL DEFAULT 0,
       created_at    TEXT NOT NULL
     );
   `)
+  // Migrate DBs created before the admin flag existed.
+  const cols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
+  if (!cols.some(c => c.name === 'is_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0')
+  }
 }
 
 function db(): DB {
@@ -69,12 +81,13 @@ export function upsertGithubUser(p: {
     avatar_url: p.avatarUrl,
     message_count: 0,
     unlimited: 0,
+    is_admin: 0,
     created_at: new Date().toISOString(),
   }
   db()
     .prepare(
-      `INSERT INTO users (id, github_id, username, avatar_url, message_count, unlimited, created_at)
-       VALUES (@id, @github_id, @username, @avatar_url, @message_count, @unlimited, @created_at)`,
+      `INSERT INTO users (id, github_id, username, avatar_url, message_count, unlimited, is_admin, created_at)
+       VALUES (@id, @github_id, @username, @avatar_url, @message_count, @unlimited, @is_admin, @created_at)`,
     )
     .run(user)
   return user
