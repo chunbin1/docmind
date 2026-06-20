@@ -18,7 +18,7 @@ services:
     expose:
       - "3001"
     env_file:
-      - ./packages/server/.env
+      - ./packages/server/.env.prod
     environment:
       - CHROMA_URL=http://chroma:8000
       - PORT=3001
@@ -34,7 +34,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${CLIENT_PORT:-8080}:80"
+      # Bind to loopback only — public access goes through the host nginx +
+      # Cloudflare, never directly to :8080. Set CLIENT_BIND=0.0.0.0 to expose.
+      - "${CLIENT_BIND:-127.0.0.1}:${CLIENT_PORT:-8080}:80"
     depends_on:
       - server
 

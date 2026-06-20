@@ -1,5 +1,6 @@
 node_modules/
 packages/server/.env
+packages/server/.env.prod
 packages/client/dist/
 .DS_Store
 *.log
