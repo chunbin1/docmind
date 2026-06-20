@@ -1,0 +1,72 @@
+.wrap {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gray-50, #f8f9fb);
+}
+
+.card {
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 16px;
+  padding: 40px 32px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+.logoIcon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border-radius: 12px;
+  background: var(--purple);
+  color: white;
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin: 0 0 6px;
+}
+
+.desc {
+  font-size: 14px;
+  color: var(--gray-500, #6b7280);
+  margin: 0 0 28px;
+}
+
+.githubBtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #24292f;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.githubBtn:hover {
+  background: #1b1f24;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--gray-400);
+  margin: 18px 0 0;
+}

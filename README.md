@@ -82,6 +82,23 @@ docker compose -f docker-compose.dev.yml up --build
 | `ZHIPU_MODEL` | GLM 模型，逗号分隔（自动降级） | `glm-4-flash` |
 | `PORT` | 服务端口 | `3001` |
 | `CHROMA_URL` | ChromaDB 地址 | `http://localhost:8000` |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth 应用凭证 | — |
+| `APP_URL` | 应用公网地址（用于 OAuth 回调与 cookie） | `http://localhost:5173` |
+| `COOKIE_SECRET` | 会话 cookie 签名密钥（`openssl rand -hex 32`） | 随机（重启失效） |
+| `MESSAGE_LIMIT` | 每位用户消息上限 | `10` |
+| `AUTH_DISABLED` | 本地开发跳过登录（无限用户） | — |
+
+### 登录与消息限额（GitHub OAuth）
+
+- 用户需用 **GitHub 登录** 后才能对话；每位用户默认仅可发送 **10 条消息**。
+- 在 [github.com/settings/developers](https://github.com/settings/developers) 创建 OAuth App，回调地址填 `${APP_URL}/api/auth/github/callback`，把 Client ID / Secret 写入 `.env`。
+- **无限调用开关**：`users` 表的 `unlimited` 字段（`0`=受限，`1`=无限）。**没有任何接口可改它**，只能直接改库：
+
+  ```sql
+  UPDATE users SET unlimited = 1 WHERE username = '你的GitHub用户名';
+  ```
+
+- 本地开发可设 `AUTH_DISABLED=true` 跳过登录（视为无限用户）。
 
 ### 项目结构
 

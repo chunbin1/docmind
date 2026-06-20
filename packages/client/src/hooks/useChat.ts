@@ -170,6 +170,17 @@ export function useChat(): UseChatReturn {
         signal: controller.signal,
       })
 
+      if (res.status === 401) {
+        setLastError('登录已失效，请重新登录')
+        window.dispatchEvent(new CustomEvent('auth:refresh'))
+        return
+      }
+      if (res.status === 403) {
+        const body = (await res.json().catch(() => ({}))) as { limit?: number }
+        setLastError(`已达每位用户 ${body.limit ?? 10} 条消息上限`)
+        window.dispatchEvent(new CustomEvent('auth:refresh'))
+        return
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
       const reader = res.body?.getReader()
@@ -196,6 +207,7 @@ export function useChat(): UseChatReturn {
             if (json.error) throw new Error(json.error)
             if (json.text) appendToLast(json.text)
             if (json.done) {
+              window.dispatchEvent(new CustomEvent('auth:refresh'))
               turnCountRef.current += 1
               if (turnCountRef.current % NUDGE_INTERVAL === 0) triggerNudge()
               return
