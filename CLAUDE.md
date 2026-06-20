@@ -23,9 +23,9 @@ pnpm run build:client  # Vite build for client
 cd packages/server && pnpm exec tsc --noEmit
 cd packages/client && pnpm exec tsc --noEmit
 
-# Docker
-docker compose up chroma -d          # Start only ChromaDB (required for dev)
-docker compose up --build            # Full stack (Chroma + Server + Client)
+# Docker (dev: docker-compose.dev.yml; prod deploy: docker-compose.prod.yml)
+docker compose -f docker-compose.dev.yml up chroma -d   # Start only ChromaDB (required for dev)
+docker compose -f docker-compose.dev.yml up --build     # Full stack (Chroma + Server + Client)
 ```
 
 There is no lint or test script configured yet.
