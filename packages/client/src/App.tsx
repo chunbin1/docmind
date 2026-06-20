@@ -19,7 +19,7 @@ export default function App() {
     stopStreaming,
     clearMessages,
     togglePin,
-  } = useChat()
+  } = useChat(auth.user?.id ?? null)
   const docs = useDocuments()
   const bottomRef = useRef<HTMLDivElement>(null)
 

@@ -52,6 +52,7 @@ export function isDocVectorAvailable(): boolean {
 }
 
 export async function upsertChunks(
+  userId: string,
   docId: string,
   filename: string,
   chunks: string[],
@@ -61,7 +62,7 @@ export async function upsertChunks(
   try {
     const embeddings = await embedBatch(chunks)
     const ids = chunks.map((_, i) => `${docId}_chunk_${i}`)
-    const metadatas = chunks.map((_, i) => ({ doc_id: docId, filename, chunk_index: i }))
+    const metadatas = chunks.map((_, i) => ({ doc_id: docId, filename, chunk_index: i, user_id: userId }))
 
     await _collection.upsert({
       ids,
@@ -88,17 +89,24 @@ export async function searchChunks(
   query: string,
   docIds: string[],
   maxK = RAG.maxK,
+  userId?: string,
 ): Promise<DocumentChunk[]> {
   if (!_available || !_collection || docIds.length === 0) return []
 
   try {
     const queryEmbedding = (await embedBatch([query]))[0]
+    const docFilter = docIds.length === 1
+      ? { doc_id: { $eq: docIds[0] } }
+      : { doc_id: { $in: docIds } }
+    // When a userId is given, also require it — so one user can never retrieve
+    // another user's chunks even if they pass a foreign doc_id.
+    const where = userId
+      ? { $and: [docFilter, { user_id: { $eq: userId } }] }
+      : docFilter
     const results = await _collection.query({
       queryEmbeddings: [queryEmbedding],
       nResults: candidatePool(maxK),
-      where: docIds.length === 1
-        ? { doc_id: { $eq: docIds[0] } }
-        : { doc_id: { $in: docIds } },
+      where,
     })
 
     const ids = results.ids[0] ?? []
