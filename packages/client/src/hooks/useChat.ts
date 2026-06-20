@@ -25,35 +25,45 @@ export function useChat(userId: string | null): UseChatReturn {
   const [streaming, setStreaming] = useState(false)
   const [compacting, setCompacting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevKeyRef = useRef<string | null>(null)
   const turnCountRef = useRef(0)
   const messagesRef = useRef<ChatMessage[]>(messages)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
 
   // Load this account's history when the user changes (empty on logout).
+  // One-time migration: the first account to log in on this browser adopts the
+  // pre-auth global history, then it's retired.
   useEffect(() => {
     if (!storageKey) { setMessages([]); return }
     try {
-      const saved = localStorage.getItem(storageKey)
-      setMessages(saved ? (JSON.parse(saved) as ChatMessage[]) : [])
+      let raw = localStorage.getItem(storageKey)
+      if (!raw) {
+        const legacy = localStorage.getItem('docmind:chat:messages')
+        if (legacy) {
+          localStorage.setItem(storageKey, legacy)
+          localStorage.removeItem('docmind:chat:messages')
+          raw = legacy
+        }
+      }
+      setMessages(raw ? (JSON.parse(raw) as ChatMessage[]) : [])
     } catch {
       setMessages([])
     }
   }, [storageKey])
 
+  // Persist immediately (no debounce) so a refresh right after an answer can't
+  // lose it. Skip while streaming, when logged out, and on the render right
+  // after an account switch (messages still hold the previous account's state
+  // until the load effect above replaces them — writing here would clobber it).
   useEffect(() => {
-    if (streaming || !storageKey) return
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(messages.slice(-50)))
-      } catch {
-        localStorage.setItem(storageKey, JSON.stringify(messages.slice(-20)))
-      }
-    }, 500)
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    const keyChanged = prevKeyRef.current !== storageKey
+    prevKeyRef.current = storageKey
+    if (streaming || !storageKey || keyChanged) return
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-50)))
+    } catch {
+      localStorage.setItem(storageKey, JSON.stringify(messages.slice(-20)))
     }
   }, [messages, streaming, storageKey])
 
