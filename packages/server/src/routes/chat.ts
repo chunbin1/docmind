@@ -10,6 +10,7 @@ import { getWeather } from '../tools/weather.js'
 import { logLlmRequest } from '../llmLog.js'
 import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
+import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded } from '../services/tracing.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
@@ -65,7 +66,8 @@ async function runToolsIfNeeded(
       max_tokens: 256,
       stream: false,
     })
-  } catch {
+  } catch (err) {
+    markDegraded('tool_preflight_failed', { error: err instanceof Error ? err.message : String(err) })
     return '' // 工具预检失败不影响主流程
   }
 
@@ -114,15 +116,23 @@ function trimHistoryByTokens(history: LLMMessage[], maxTokens = 6000): LLMMessag
 async function getRelevantNotes(userId: string, query: string, topK = 3): Promise<MemoryNote[]> {
   if (isVectorAvailable()) {
     const results = await semanticSearch(userId, query, topK)
-    if (results.length > 0) return results
+    if (results.length > 0) { spanMeta('path', 'vector'); spanMeta('hits', results.length); return results }
+    markDegraded('memory_fts_fallback')
+  } else {
+    markDegraded('memory_vector_unavailable')
   }
-  return searchFts(userId, query, topK)
+  const fts = searchFts(userId, query, topK)
+  spanMeta('path', 'fts'); spanMeta('hits', fts.length)
+  return fts
 }
 
 async function getRelevantChunks(userId: string, query: string, docIds: string[]): Promise<DocumentChunk[]> {
-  if (!docIds.length || !isDocVectorAvailable()) return []
+  if (!docIds.length) return []
+  if (!isDocVectorAvailable()) { markDegraded('doc_vector_unavailable'); return [] }
   // undefined maxK keeps the RAG.maxK default; userId limits retrieval to this user's chunks.
-  return searchChunks(query, docIds, undefined, userId)
+  const chunks = await searchChunks(query, docIds, undefined, userId)
+  spanMeta('docIds', docIds.length); spanMeta('kept', chunks.length)
+  return chunks
 }
 
 function persistFacts(userId: string, facts: string[], source: string): MemoryNote[] {
@@ -191,50 +201,81 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     // Count this send against the user's quota (no-op for unlimited users via canSend).
     incrementMessageCount(user.id)
 
-    const [relevantNotes, relevantChunks, toolSection] = await Promise.all([
-      getRelevantNotes(user.id, message),
-      getRelevantChunks(user.id, message, docIds),
-      runToolsIfNeeded(message, history),
-    ])
-
-    const memSection = relevantNotes.length
-      ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
-      : ''
-
-    const docSection = relevantChunks.length
-      ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
-      : ''
-
-    const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, docSection, toolSection]
-      .filter(Boolean)
-      .join('\n\n')
-
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-
-    const send = (payload: SSEPayload): void => {
-      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
-    }
-
-    const messages: LLMMessage[] = [
-      ...trimHistoryByTokens(history),
-      { role: 'user', content: message },
-    ]
-
     try {
-      const stream = streamChat({ messages, system: finalSystem, tag: 'chat/stream' })
-      for await (const text of stream) send({ text })
-      send({ done: true })
-    } catch (err) {
-      app.log.error(err)
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      send({ error: msg })
-    } finally {
-      reply.raw.end()
+      await runInTrace({ route: '/chat/stream', userId: user.id }, async () => {
+        const [relevantNotes, relevantChunks, toolSection] = await Promise.all([
+          withSpan('memory_retrieval', async () => {
+            spanInput(message)
+            const notes = await getRelevantNotes(user.id, message)
+            spanOutput(notes.map(n => n.content).join('\n'))
+            return notes
+          }),
+          withSpan('doc_retrieval', async () => {
+            spanInput(message)
+            const chunks = await getRelevantChunks(user.id, message, docIds)
+            spanOutput(chunks.map(c => `[${c.filename}·块${c.chunk_index}] ${c.content}`).join('\n'))
+            return chunks
+          }),
+          withSpan('tool_preflight', () => runToolsIfNeeded(message, history)),
+        ])
+
+        const finalSystem = await withSpan('prompt_assembly', async () => {
+          const memSection = relevantNotes.length
+            ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
+            : ''
+          const docSection = relevantChunks.length
+            ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
+            : ''
+          const trimmed = trimHistoryByTokens(history)
+          if (trimmed.length < history.length) {
+            markDegraded('history_trimmed', { dropped: history.length - trimmed.length })
+          }
+          const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, docSection, toolSection]
+            .filter(Boolean).join('\n\n')
+          spanMeta('finalTokens', estimateTokens(finalSystem))
+          return finalSystem
+        })
+
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        })
+        const send = (payload: SSEPayload): void => {
+          reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
+        }
+        const messages: LLMMessage[] = [
+          ...trimHistoryByTokens(history),
+          { role: 'user', content: message },
+        ]
+
+        await withSpan('llm_generation', async () => {
+          spanMeta('provider', PROVIDER)
+          const t0 = performance.now()
+          let firstAt = 0
+          let out = ''
+          try {
+            const stream = streamChat({ messages, system: finalSystem, tag: 'chat/stream' })
+            for await (const text of stream) {
+              if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
+              out += text
+              send({ text })
+            }
+            spanOutput(out)
+            spanMeta('outputTokens', estimateTokens(out))
+            send({ done: true })
+          } catch (err) {
+            app.log.error(err)
+            send({ error: err instanceof Error ? err.message : 'Unknown error' })
+            throw err   // withSpan marks the span error; caught below so it doesn't reach Fastify
+          } finally {
+            reply.raw.end()
+          }
+        })
+      })
+    } catch {
+      // LLM failure was already sent to the client via SSE and recorded in the trace.
     }
   })
 
