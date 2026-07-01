@@ -1,5 +1,5 @@
 // packages/server/src/routes/auth.ts
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify'
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
 import { randomBytes } from 'node:crypto'
 import {
   upsertGithubUser,
@@ -48,6 +48,21 @@ export function currentUser(request: FastifyRequest): User | null {
   const unsigned = request.unsignCookie(raw)
   if (!unsigned.valid || !unsigned.value) return null
   return getUserById(unsigned.value)
+}
+
+/** Reply 401 and return null if not logged in; otherwise return the user. */
+export function requireUser(request: FastifyRequest, reply: FastifyReply): User | null {
+  const user = currentUser(request)
+  if (!user) { void reply.code(401).send({ error: 'unauthorized' }); return null }
+  return user
+}
+
+/** Reply 401/403 and return null unless logged in AND admin. */
+export function requireAdmin(request: FastifyRequest, reply: FastifyReply): User | null {
+  const user = requireUser(request, reply)
+  if (!user) return null
+  if (user.is_admin !== 1) { void reply.code(403).send({ error: 'forbidden' }); return null }
+  return user
 }
 
 function publicUser(user: User) {
