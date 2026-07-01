@@ -10,7 +10,7 @@ import { getWeather } from '../tools/weather.js'
 import { logLlmRequest } from '../llmLog.js'
 import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
-import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded } from '../services/tracing.js'
+import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
@@ -137,8 +137,18 @@ async function getRelevantChunks(userId: string, query: string, docIds: string[]
 
 function persistFacts(userId: string, facts: string[], source: string): MemoryNote[] {
   const saved = addNotes(userId, facts, source)
+  const traceId = currentTraceId()
   for (const note of saved) {
-    upsertNote(userId, note).catch(() => {})
+    upsertNote(userId, note).catch((err: unknown) => {
+      if (traceId) {
+        appendSpanLate(traceId, {
+          name: 'memory_vector_write',
+          status: 'degraded',
+          degradedReason: 'memory_vector_write_failed',
+          errorMessage: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })
   }
   return saved
 }
@@ -287,26 +297,29 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'messages is required' })
     }
 
-    const historyText = messages
-      .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
-      .join('\n')
+    return runInTrace({ route: '/chat/compact', userId: user.id }, async () => {
+      const historyText = messages
+        .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`).join('\n')
 
-    let rawOutput = ''
-    const stream = streamChat({
-      messages: [{
-        role: 'user',
-        content: `请分析以下对话，完成两项任务：\n\n1. 生成对话摘要（300字以内，保留关键信息和用户意图）\n2. 提取值得长期记忆的重要事实（最多5条，每条50字以内，每行一条）\n\n请严格按以下格式输出（不要添加其他内容）：\n\n##SUMMARY##\n[摘要内容]\n\n##FACTS##\n[事实1]\n[事实2]\n\n对话内容：\n${historyText}`,
-      }],
-      system: '你是对话分析助手，专注提炼关键信息和重要事实。',
-      maxTokens: 1024,
-      tag: 'chat/compact',
+      let rawOutput = ''
+      await withSpan('summarize', async () => {
+        const stream = streamChat({
+          messages: [{ role: 'user', content: `请分析以下对话，完成两项任务：\n\n1. 生成对话摘要（300字以内，保留关键信息和用户意图）\n2. 提取值得长期记忆的重要事实（最多5条，每条50字以内，每行一条）\n\n请严格按以下格式输出（不要添加其他内容）：\n\n##SUMMARY##\n[摘要内容]\n\n##FACTS##\n[事实1]\n[事实2]\n\n对话内容：\n${historyText}` }],
+          system: '你是对话分析助手，专注提炼关键信息和重要事实。',
+          maxTokens: 1024,
+          tag: 'chat/compact',
+        })
+        for await (const text of stream) rawOutput += text
+        spanOutput(rawOutput)
+      })
+
+      const { summary, facts } = parseCompactOutput(rawOutput)
+      await withSpan('memory_write', async () => {
+        if (facts.length > 0) persistFacts(user.id, facts, 'compact')
+        spanMeta('facts', facts.length)
+      })
+      return { summary, facts }
     })
-    for await (const text of stream) rawOutput += text
-
-    const { summary, facts } = parseCompactOutput(rawOutput)
-    if (facts.length > 0) persistFacts(user.id, facts, 'compact')
-
-    return { summary, facts }
   })
 
   app.post<{ Body: NudgeBody }>('/chat/nudge', async (request, reply) => {
@@ -317,35 +330,37 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'messages required' })
     }
 
-    const historyText = messages
-      .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
-      .join('\n')
+    return runInTrace({ route: '/chat/nudge', userId: user.id }, async () => {
+      const historyText = messages
+        .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`).join('\n')
 
-    let rawFacts = ''
-    try {
-      const stream = streamChat({
-        messages: [{
-          role: 'user',
-          content: `请从以下对话中提取值得长期记忆的重要事实（用户偏好、关键决策、重要信息），每条独立一行，最多5条，每条不超过50字。如果没有值得记住的，返回空内容。\n\n对话：\n${historyText}`,
-        }],
-        system: '你是记忆提取助手，只输出事实条目，不解释，不加序号。',
-        maxTokens: 300,
-        tag: 'chat/nudge',
+      let rawFacts = ''
+      try {
+        await withSpan('fact_extraction', async () => {
+          const stream = streamChat({
+            messages: [{ role: 'user', content: `请从以下对话中提取值得长期记忆的重要事实（用户偏好、关键决策、重要信息），每条独立一行，最多5条，每条不超过50字。如果没有值得记住的，返回空内容。\n\n对话：\n${historyText}` }],
+            system: '你是记忆提取助手，只输出事实条目，不解释，不加序号。',
+            maxTokens: 300,
+            tag: 'chat/nudge',
+          })
+          for await (const text of stream) rawFacts += text
+          spanOutput(rawFacts)
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        app.log.warn(`nudge LLM error: ${msg}`)
+        return { extracted: 0 }
+      }
+
+      const facts = rawFacts.split('\n')
+        .map(l => l.trim().replace(/^[-·•\d.]\s*/, ''))
+        .filter(l => l.length > 3 && l.length <= 200).slice(0, 5)
+
+      await withSpan('memory_write', async () => {
+        if (facts.length > 0) persistFacts(user.id, facts, 'nudge')
+        spanMeta('facts', facts.length)
       })
-      for await (const text of stream) rawFacts += text
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      app.log.warn(`nudge LLM error: ${msg}`)
-      return { extracted: 0 }
-    }
-
-    const facts = rawFacts
-      .split('\n')
-      .map(l => l.trim().replace(/^[-·•\d.]\s*/, ''))
-      .filter(l => l.length > 3 && l.length <= 200)
-      .slice(0, 5)
-
-    if (facts.length > 0) persistFacts(user.id, facts, 'nudge')
-    return { extracted: facts.length }
+      return { extracted: facts.length }
+    })
   })
 }
