@@ -17,7 +17,10 @@ cd "$(dirname "$0")"
 
 CONTEXT="${DOCKER_CONTEXT:-docmind}"
 COMPOSE_FILE="docker-compose.prod.yml"
-ENV_FILE="packages/server/.env"
+# Production env (separate from local dev's .env): LLM keys + GitHub OAuth +
+# APP_URL + COOKIE_SECRET. Read locally by compose and injected into the
+# remote container; the file itself never leaves this machine.
+ENV_FILE="packages/server/.env.prod"
 
 # --- sanity checks ----------------------------------------------------------
 if ! docker context inspect "$CONTEXT" >/dev/null 2>&1; then
@@ -27,8 +30,10 @@ if ! docker context inspect "$CONTEXT" >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "✗ Missing $ENV_FILE (your API keys / config)."
-  echo "  Copy the example and fill it in:  cp packages/server/.env.example $ENV_FILE"
+  echo "✗ Missing $ENV_FILE (production config: LLM key, GitHub OAuth, APP_URL, COOKIE_SECRET)."
+  echo "  Create it:  cp packages/server/.env.example $ENV_FILE"
+  echo "  then set APP_URL=https://your-domain plus the GitHub OAuth + COOKIE_SECRET values."
+  echo "  (See docs/DEPLOY.md.)"
   exit 1
 fi
 
@@ -41,6 +46,6 @@ echo
 echo "→ Running containers:"
 docker --context "$CONTEXT" compose -f "$COMPOSE_FILE" ps
 
-REMOTE_HOST="$(docker context inspect "$CONTEXT" --format '{{.Endpoints.docker.Host}}' | sed -E 's#ssh://[^@]+@##; s#:.*##')"
+APP_URL="$(grep -E '^APP_URL=' "$ENV_FILE" | cut -d= -f2-)"
 echo
-echo "✓ Done. App should be live at:  http://${REMOTE_HOST}:${CLIENT_PORT:-8080}"
+echo "✓ Done. App should be live at:  ${APP_URL:-your configured domain (APP_URL)}"
