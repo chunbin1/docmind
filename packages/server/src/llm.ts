@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { LLMProvider, StreamChatOptions } from './types.js'
 import { logLlmRequest } from './llmLog.js'
+import { markDegraded } from './services/tracing.js'
 
 function detectProvider(): LLMProvider {
   const explicit = process.env.LLM_PROVIDER?.toLowerCase()
@@ -97,6 +98,7 @@ async function* streamZhipu({
       const hasNext = i < models.length - 1
       if (isQuotaError(err) && hasNext) {
         console.warn(`[llm] model "${model}" quota exhausted, switching to "${models[i + 1]}"`)
+        markDegraded('llm_model_fallback', { from: model, to: models[i + 1] })
         continue
       }
       throw err
