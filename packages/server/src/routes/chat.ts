@@ -53,7 +53,10 @@ async function runToolsIfNeeded(
     { role: 'user', content: message },
   ]
 
-  const model = process.env.ZHIPU_MODEL ?? 'glm-4.7'
+  // Match streamZhipu: ZHIPU_MODEL may be a comma-separated list — use the first
+  // model, not the raw string (which would be an invalid model name and fail preflight).
+  const model = (process.env.ZHIPU_MODEL ?? 'glm-4.7').split(',')[0].trim()
+  spanMeta('model', model)
   logLlmRequest('chat/tool-preflight', { model, messages, tools: TOOLS })
 
   let response: OpenAI.Chat.ChatCompletion
@@ -72,6 +75,7 @@ async function runToolsIfNeeded(
   }
 
   const toolCalls = response.choices[0]?.message?.tool_calls
+  spanMeta('toolCalled', (toolCalls?.length ?? 0) > 0)
   if (!toolCalls?.length) return ''
 
   const results: string[] = []
@@ -81,6 +85,7 @@ async function runToolsIfNeeded(
       if (!fn) continue
       const args = JSON.parse(fn.arguments) as Record<string, string>
       if (fn.name === 'get_weather') {
+        spanMeta('city', args.city ?? '')
         const result = await getWeather(args.city ?? '')
         results.push(result)
       }
