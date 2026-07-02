@@ -2,6 +2,7 @@
 import { ChromaClient } from 'chromadb'
 import { embedBatch, isEmbeddingAvailable, ZhipuEmbeddingFunction } from './embeddings.js'
 import { RAG, candidatePool } from './ragConfig.js'
+import { markDegraded } from './tracing.js'
 import type { DocumentChunk } from '../types.js'
 
 const LOG_RETRIEVAL = /^(1|true)$/i.test(process.env.LOG_RETRIEVAL ?? '')
@@ -126,7 +127,13 @@ export async function searchChunks(
     // 距离阈值 + 动态 k
     const within = candidates.filter(c => c.distance <= RAG.distanceThreshold)
     let kept = within.slice(0, maxK)
-    if (kept.length < RAG.minK) kept = candidates.slice(0, RAG.minK)
+    if (kept.length < RAG.minK) {
+      kept = candidates.slice(0, RAG.minK)
+      markDegraded('doc_retrieval_minK', {
+        threshold: RAG.distanceThreshold,
+        topDistance: candidates[0]?.distance ?? null,
+      })
+    }
 
     if (LOG_RETRIEVAL) logRetrieval(query, candidates, kept)
     return kept

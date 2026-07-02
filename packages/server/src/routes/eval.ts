@@ -1,5 +1,5 @@
 // packages/server/src/routes/eval.ts
-import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyPluginAsync, FastifyReply } from 'fastify'
 import {
   getAllTestSets,
   getTestSet,
@@ -11,8 +11,7 @@ import {
 } from '../services/evalStore.js'
 import { generateTestSet } from '../services/evalGenerator.js'
 import { runEvaluation, resumeEvaluation } from '../services/evalRunner.js'
-import { currentUser } from './auth.js'
-import type { User } from '../services/userStore.js'
+import { requireAdmin } from './auth.js'
 
 interface GenerateBody { docId: string }
 interface RunBody { testSetId: string }
@@ -27,20 +26,6 @@ function requireZhipu(reply: FastifyReply): boolean {
   return false
 }
 
-// Eval is admin-only. Returns the user only when logged in AND an admin,
-// otherwise replies 401/403 and returns null.
-function requireAdmin(request: FastifyRequest, reply: FastifyReply): User | null {
-  const user = currentUser(request)
-  if (!user) {
-    void reply.code(401).send({ error: 'unauthorized' })
-    return null
-  }
-  if (user.is_admin !== 1) {
-    void reply.code(403).send({ error: 'forbidden' })
-    return null
-  }
-  return user
-}
 
 export const evalRoutes: FastifyPluginAsync = async (app) => {
   // 生成测试集（阻塞式，可能耗时 30s+）
