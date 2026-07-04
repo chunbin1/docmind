@@ -103,3 +103,46 @@ export interface EvalResultWithCase extends EvalResult {
   expected_answer: string
   difficulty: EvalDifficulty
 }
+
+// === Trace 可视化类型（对齐 server 端 tracing.ts）===
+
+export type TraceStatus = 'ok' | 'degraded' | 'error'
+
+/** GET /api/traces 列表项 / GET /api/traces/:id 的 trace 字段 */
+export interface TraceRecord {
+  id: string
+  route: string
+  user_id: string | null
+  status: TraceStatus
+  duration_ms: number
+  span_count: number
+  degraded_count: number
+  error_count: number
+  started_at: string
+  created_at: string
+}
+
+/** GET /api/traces/:id 返回的单个 span */
+export interface SpanRecord {
+  id: string
+  trace_id: string
+  parent_span_id: string | null
+  name: string
+  status: TraceStatus
+  start_offset_ms: number
+  duration_ms: number
+  degraded_reason: string | null
+  input: string | null
+  output: string | null
+  /** JSON 字符串 */
+  metadata: string
+  error_message: string | null
+}
+
+/** buildWaterfall 的输出行 */
+export interface WaterfallRow {
+  span: SpanRecord
+  depth: number
+  leftPct: number
+  widthPct: number
+}

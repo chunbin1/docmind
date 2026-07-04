@@ -1,0 +1,39 @@
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.back {
+  color: var(--purple);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.back:hover { text-decoration: underline; }
+
+.summary {
+  margin-top: 12px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--gray-900);
+  font-family: ui-monospace, monospace;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--gray-600);
+}
+
+.loading, .empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--gray-400);
+}
