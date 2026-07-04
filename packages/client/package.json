@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/lib/waterfall.test.ts"
+    "test": "tsx --test src/lib/waterfall.test.ts src/lib/statBars.test.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

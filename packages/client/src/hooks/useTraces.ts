@@ -8,16 +8,25 @@ export interface TraceDetail {
   spans: SpanRecord[]
 }
 
+export interface TraceStats {
+  total: number
+  degradedPct: number
+  byReason: Record<string, number>
+}
+
 export interface UseTracesReturn {
   traces: TraceRecord[]
+  stats: TraceStats | null
   loading: boolean
   error: string | null
   fetchList: (filter?: { status?: string; limit?: number }) => Promise<void>
+  fetchStats: () => Promise<void>
   fetchDetail: (id: string) => Promise<TraceDetail | null>
 }
 
 export function useTraces(): UseTracesReturn {
   const [traces, setTraces] = useState<TraceRecord[]>([])
+  const [stats, setStats] = useState<TraceStats | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -38,11 +47,22 @@ export function useTraces(): UseTracesReturn {
     }
   }, [])
 
+  // 概览统计。失败时静默置空，不写 error、不阻塞列表。
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/traces/stats`)
+      if (!res.ok) { setStats(null); return }
+      setStats(await res.json() as TraceStats)
+    } catch {
+      setStats(null)
+    }
+  }, [])
+
   const fetchDetail = useCallback(async (id: string): Promise<TraceDetail | null> => {
     const res = await fetch(`${API}/traces/${id}`)
     if (!res.ok) return null
     return res.json() as Promise<TraceDetail>
   }, [])
 
-  return { traces, loading, error, fetchList, fetchDetail }
+  return { traces, stats, loading, error, fetchList, fetchStats, fetchDetail }
 }
