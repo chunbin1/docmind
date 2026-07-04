@@ -52,20 +52,21 @@ export function useChat(userId: string | null): UseChatReturn {
     }
   }, [storageKey])
 
-  // Persist immediately (no debounce) so a refresh right after an answer can't
-  // lose it. Skip while streaming, when logged out, and on the render right
-  // after an account switch (messages still hold the previous account's state
-  // until the load effect above replaces them — writing here would clobber it).
+  // Persist on every change, including mid-stream, so a refresh at any moment
+  // (even before the answer finishes) can't lose messages. Skip when logged
+  // out, and on the render right after an account switch (messages still hold
+  // the previous account's state until the load effect above replaces them —
+  // writing here would clobber it).
   useEffect(() => {
     const keyChanged = prevKeyRef.current !== storageKey
     prevKeyRef.current = storageKey
-    if (streaming || !storageKey || keyChanged) return
+    if (!storageKey || keyChanged) return
     try {
       localStorage.setItem(storageKey, JSON.stringify(messages.slice(-50)))
     } catch {
       localStorage.setItem(storageKey, JSON.stringify(messages.slice(-20)))
     }
-  }, [messages, streaming, storageKey])
+  }, [messages, storageKey])
 
   const appendToLast = (text: string): void => {
     setMessages(prev => {
