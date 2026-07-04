@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTraces } from '../hooks/useTraces'
 import { TraceList } from './TraceList'
+import { TraceStats } from './TraceStats'
 import styles from './TracesPage.module.css'
 
 export function TracesPage() {
-  const { traces, loading, error, fetchList } = useTraces()
+  const { traces, stats, loading, error, fetchList, fetchStats } = useTraces()
   const [status, setStatus] = useState('')
   const navigate = useNavigate()
 
-  const load = (): void => { void fetchList({ status: status || undefined, limit: 100 }) }
+  const load = (): void => {
+    void fetchList({ status: status || undefined, limit: 100 })
+    void fetchStats()
+  }
 
   useEffect(load, [status])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -32,6 +36,8 @@ export function TracesPage() {
           <button className={styles.btn} onClick={load}>刷新</button>
         </div>
       </header>
+
+      {stats && <TraceStats stats={stats} />}
 
       {error && (
         <div className={styles.error}>
