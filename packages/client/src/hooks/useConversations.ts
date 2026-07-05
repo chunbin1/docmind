@@ -10,6 +10,9 @@ export function useConversations(userId: string | null): UseConversationsReturn 
   const [loading, setLoading] = useState(false)
   const mountedRef = useRef(true)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 换号防护：每次"加载会话列表" effect 开始时递增；.then/.catch/.finally
+  // 内 setState 前必须核对 loadRunRef.current 未变，否则说明 userId 已经切换，结果作废。
+  const loadRunRef = useRef(0)
   // 供 deleteConversation 基于最新值计算，不受闭包过期影响。
   const conversationsRef = useRef<Conversation[]>([])
   const currentIdRef = useRef<string | null>(null)
@@ -47,19 +50,22 @@ export function useConversations(userId: string | null): UseConversationsReturn 
 
   // 加载会话列表（userId 变化 / 登出清空）。
   useEffect(() => {
+    loadRunRef.current += 1
+    const myRun = loadRunRef.current
+    const isStale = () => !mountedRef.current || loadRunRef.current !== myRun
     if (!userId) { setConversations([]); setCurrentId(null); return }
     setLoading(true)
     fetchList()
       .then(l => {
-        if (!mountedRef.current) return
+        if (isStale()) return
         setConversations(l)
         let saved: string | null = null
         try { saved = localStorage.getItem(storageKey(userId)) } catch { /* ignore */ }
         const validSaved = saved && l.some(c => c.id === saved) ? saved : null
         setCurrentId(validSaved ?? l[0]?.id ?? null)
       })
-      .catch(() => { if (mountedRef.current) { setConversations([]); setCurrentId(null) } })
-      .finally(() => { if (mountedRef.current) setLoading(false) })
+      .catch(() => { if (!isStale()) { setConversations([]); setCurrentId(null) } })
+      .finally(() => { if (!isStale()) setLoading(false) })
   }, [userId, fetchList])
 
   // 存在 generating 会话时 2s 轮询刷新列表（更新"生成中"圆点）；无则停轮询。
