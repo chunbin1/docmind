@@ -1,0 +1,39 @@
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  max-width: 200px;
+  cursor: pointer;
+  /* 未选中：淡色描边态 */
+  background: #f5f6f8;
+  border: 1px solid #d9dce1;
+  color: #6b7280;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.tag:hover {
+  border-color: #b3d9f5;
+  color: #1a6fa8;
+}
+
+/* 选中：高亮填充态（沿用原 chip 的蓝） */
+.selected {
+  background: #e8f4fd;
+  border-color: #b3d9f5;
+  color: #1a6fa8;
+}
+
+.icon {
+  font-size: 11px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -116,6 +116,15 @@ export function useChat(userId: string | null): UseChatReturn {
     })
   }
 
+  const appendReasoningToLast = (text: string): void => {
+    setMessages(prev => {
+      const updated = [...prev]
+      const last = updated[updated.length - 1]
+      updated[updated.length - 1] = { ...last, reasoning: (last.reasoning ?? '') + text }
+      return updated
+    })
+  }
+
   const setLastError = (error: string): void => {
     setMessages(prev => {
       const updated = [...prev]
@@ -186,7 +195,7 @@ export function useChat(userId: string | null): UseChatReturn {
     setMessages(prev => [
       ...prev,
       { role: 'user', content: message, status: 'done' },
-      { role: 'assistant', content: '', status: 'generating' },
+      { role: 'assistant', content: '', status: 'generating', reasoning: '' },
     ])
     setStreaming(true)
 
@@ -225,8 +234,9 @@ export function useChat(userId: string | null): UseChatReturn {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           try {
-            const json = JSON.parse(line.slice(6)) as { error?: string; text?: string; done?: boolean }
+            const json = JSON.parse(line.slice(6)) as { error?: string; text?: string; reasoning?: string; done?: boolean }
             if (json.error) throw new Error(json.error)
+            if (json.reasoning) appendReasoningToLast(json.reasoning)
             if (json.text) appendToLast(json.text)
             if (json.done) {
               setMessages(prev => {
@@ -251,7 +261,22 @@ export function useChat(userId: string | null): UseChatReturn {
     }
   }, [streaming, compactIfNeeded, triggerNudge])
 
-  const stopStreaming = useCallback((): void => { abortRef.current?.abort() }, [])
+  const stopStreaming = useCallback((): void => {
+    // 1) 告诉服务端真正中断生成（否则它会续写并落库，刷新后又冒出完整答案）。
+    fetch('/api/chat/stop', { method: 'POST' }).catch(() => {})
+    // 2) 中断本地 SSE 读取。
+    abortRef.current?.abort()
+    setStreaming(false)
+    // 3) 把末条生成中的 assistant 消息标为终态，解锁 UI（保留已生成的部分内容）。
+    setMessages(prev => {
+      const updated = [...prev]
+      const last = updated[updated.length - 1]
+      if (last && last.role === 'assistant' && last.status === 'generating') {
+        updated[updated.length - 1] = { ...last, status: 'done' }
+      }
+      return updated
+    })
+  }, [])
 
   const togglePin = useCallback((index: number): void => {
     const target = messagesRef.current[index]

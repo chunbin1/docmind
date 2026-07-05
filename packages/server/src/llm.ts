@@ -19,22 +19,28 @@ async function* streamAnthropic({
   messages,
   system,
   maxTokens = 2048,
+  signal,
+  onReasoning,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-  const stream = await client.messages.stream({
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
-    max_tokens: maxTokens,
-    system,
-    messages: messages.map(({ role, content }) => ({ role, content })),
-  })
+  const stream = await client.messages.stream(
+    {
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      max_tokens: maxTokens,
+      system,
+      messages: messages.map(({ role, content }) => ({ role, content })),
+    },
+    { signal },
+  )
 
   for await (const chunk of stream) {
-    if (
-      chunk.type === 'content_block_delta' &&
-      chunk.delta.type === 'text_delta'
-    ) {
-      yield chunk.delta.text
+    if (chunk.type === 'content_block_delta') {
+      if (chunk.delta.type === 'text_delta') {
+        yield chunk.delta.text
+      } else if (chunk.delta.type === 'thinking_delta' && onReasoning) {
+        onReasoning(chunk.delta.thinking)
+      }
     }
   }
 }
@@ -67,6 +73,8 @@ async function* streamZhipu({
   messages,
   system,
   maxTokens = 2048,
+  signal,
+  onReasoning,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new OpenAI({
     apiKey: process.env.ZHIPU_API_KEY,
@@ -82,16 +90,21 @@ async function* streamZhipu({
   for (let i = 0; i < models.length; i++) {
     const model = models[i]
     try {
-      const stream = await client.chat.completions.create({
-        model,
-        max_tokens: maxTokens,
-        stream: true,
-        messages: chat,
-      })
+      const stream = await client.chat.completions.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          stream: true,
+          messages: chat,
+        },
+        { signal },
+      )
 
       for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content
-        if (text) yield text
+        // reasoning_content 是智谱在 OpenAI 兼容格式上的扩展字段，SDK 类型里没有，需断言。
+        const delta = chunk.choices[0]?.delta as { content?: string; reasoning_content?: string } | undefined
+        if (delta?.reasoning_content && onReasoning) onReasoning(delta.reasoning_content)
+        if (delta?.content) yield delta.content
       }
       return
     } catch (err) {

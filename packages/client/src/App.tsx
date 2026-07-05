@@ -4,6 +4,7 @@ import { LoginGate } from './components/LoginGate'
 import { ChatView } from './components/ChatView'
 import { TracesPage } from './components/TracesPage'
 import { TraceDetailPage } from './components/TraceDetailPage'
+import { EvalTestSetDetailPage } from './components/EvalTestSetDetailPage'
 import styles from './App.module.css'
 
 export default function App() {
@@ -27,6 +28,10 @@ export default function App() {
       <Route
         path="/traces/:id"
         element={user.isAdmin ? <TraceDetailPage /> : <Navigate to="/" replace />}
+      />
+      <Route
+        path="/eval/test-sets/:id"
+        element={user.isAdmin ? <EvalTestSetDetailPage /> : <Navigate to="/" replace />}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

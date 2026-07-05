@@ -20,7 +20,9 @@ function numEnv(key: string, def: number, allowZero = false): number {
 
 export const RAG = {
   // cosine 距离阈值：只保留 distance <= 此值的块（越小越相似，范围约 0~1）。
-  distanceThreshold: numEnv('RAG_DISTANCE_THRESHOLD', 0.5),
+  // 默认 0.7：embedding-3 相关块的 cosine 距离普遍在 ~0.5~0.65，定 0.5 会把
+  // 正确块卡在阈值外，导致几乎每次检索都触发 doc_retrieval_minK 降级。
+  distanceThreshold: numEnv('RAG_DISTANCE_THRESHOLD', 0.7),
   // 最少返回块数：即使都超过阈值，也兜底返回最近的 minK 个。
   // 设为 0 可启用「无相关内容 → 不返回任何块」的拒答行为。
   minK: numEnv('RAG_MIN_K', 1, true),

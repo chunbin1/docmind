@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Document } from '../types'
-import { DocumentChip } from './DocumentChip'
+import { DocumentTag } from './DocumentTag'
 import { DocumentPicker } from './DocumentPicker'
 import styles from './ChatInput.module.css'
 
@@ -42,16 +42,16 @@ export function ChatInput({
 
   return (
     <div className={styles.container}>
-      {attachedIds.length > 0 && (
+      {documents.length > 0 && (
         <div className={styles.chips}>
-          {attachedIds.map(id => {
-            const doc = documents.find(d => d.id === id)
-            if (!doc) return null
+          {documents.map(doc => {
+            const selected = attachedIds.includes(doc.id)
             return (
-              <DocumentChip
-                key={id}
+              <DocumentTag
+                key={doc.id}
                 filename={doc.filename}
-                onRemove={() => onDetach(id)}
+                selected={selected}
+                onToggle={() => (selected ? onDetach(doc.id) : onAttach(doc.id))}
               />
             )
           })}
