@@ -86,6 +86,13 @@ export function updateMessageContent(id: string, content: string, status: ChatSt
   db().prepare('UPDATE chat_messages SET content = ?, status = ? WHERE id = ?').run(content, status, id)
 }
 
+/** Flip a still-generating message to error (no-op if it already finished). Used as a safety net when generation fails before streamAndPersist runs. */
+export function markErrorIfGenerating(id: string, fallbackContent: string): void {
+  db().prepare(
+    "UPDATE chat_messages SET status='error', content = CASE WHEN content='' THEN ? ELSE content END WHERE id = ? AND status='generating'"
+  ).run(fallbackContent, id)
+}
+
 export function hasGenerating(userId: string): boolean {
   const row = db()
     .prepare("SELECT 1 FROM chat_messages WHERE user_id = ? AND status = 'generating' LIMIT 1")

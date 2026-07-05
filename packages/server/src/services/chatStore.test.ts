@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import {
   initChatTables, appendMessage, getMessages, updateMessageContent, hasGenerating,
-  setPinned, clearMessages, replaceForCompaction,
+  setPinned, clearMessages, replaceForCompaction, markErrorIfGenerating,
 } from './chatStore.js'
 
 function setup() {
@@ -76,6 +76,38 @@ test('clearMessages 只清空本用户', () => {
   clearMessages('u1')
   assert.equal(getMessages('u1').length, 0)
   assert.equal(getMessages('u2').length, 1)
+  db.close()
+})
+
+test('markErrorIfGenerating 把仍在 generating 的消息翻成 error，content 为空时填入 fallback', () => {
+  const db = setup()
+  const { id } = appendMessage('u1', { role: 'assistant', content: '', status: 'generating' })
+  markErrorIfGenerating(id, '出错了：生成中断')
+  const row = getMessages('u1')[0]
+  assert.equal(row.status, 'error')
+  assert.equal(row.content, '出错了：生成中断')
+  db.close()
+})
+
+test('markErrorIfGenerating 对已经是 done 的消息是 no-op', () => {
+  const db = setup()
+  const { id } = appendMessage('u1', { role: 'assistant', content: '', status: 'generating' })
+  updateMessageContent(id, '完整答案', 'done')
+  markErrorIfGenerating(id, '出错了：生成中断')
+  const row = getMessages('u1')[0]
+  assert.equal(row.status, 'done')
+  assert.equal(row.content, '完整答案')
+  db.close()
+})
+
+test('markErrorIfGenerating 对已经是 error 且有内容的消息不覆盖 content', () => {
+  const db = setup()
+  const { id } = appendMessage('u1', { role: 'assistant', content: '', status: 'generating' })
+  updateMessageContent(id, '部分输出', 'error')
+  markErrorIfGenerating(id, '出错了：生成中断')
+  const row = getMessages('u1')[0]
+  assert.equal(row.status, 'error')
+  assert.equal(row.content, '部分输出')
   db.close()
 })
 

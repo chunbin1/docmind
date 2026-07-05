@@ -13,6 +13,7 @@ import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userS
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 import {
   getMessages, setPinned, clearMessages, appendMessage, hasGenerating, replaceForCompaction,
+  markErrorIfGenerating,
   type ChatMessageRow, type ChatRole, type ChatStatus,
 } from '../services/chatStore.js'
 import { streamAndPersist } from '../services/chatGeneration.js'
@@ -363,6 +364,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       })
     } catch {
       // 错误已通过 SSE 告知客户端 + 落库 status=error（streamAndPersist）+ 记入 trace。
+    } finally {
+      // 兜底：若 llm_generation 之前的任一步（记忆/文档检索、prompt_assembly）抛错，
+      // streamAndPersist 不会被调用，asst 占位会永久停在 generating，导致该用户被
+      // hasGenerating 永久 409 锁死。这里保证只要最终仍是 generating 就翻成 error；
+      // 已 done/error（streamAndPersist 已处理）则是 no-op。
+      markErrorIfGenerating(asst.id, '出错了：生成中断')
     }
   })
 
