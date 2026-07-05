@@ -251,7 +251,22 @@ export function useChat(userId: string | null): UseChatReturn {
     }
   }, [streaming, compactIfNeeded, triggerNudge])
 
-  const stopStreaming = useCallback((): void => { abortRef.current?.abort() }, [])
+  const stopStreaming = useCallback((): void => {
+    // 1) 告诉服务端真正中断生成（否则它会续写并落库，刷新后又冒出完整答案）。
+    fetch('/api/chat/stop', { method: 'POST' }).catch(() => {})
+    // 2) 中断本地 SSE 读取。
+    abortRef.current?.abort()
+    setStreaming(false)
+    // 3) 把末条生成中的 assistant 消息标为终态，解锁 UI（保留已生成的部分内容）。
+    setMessages(prev => {
+      const updated = [...prev]
+      const last = updated[updated.length - 1]
+      if (last && last.role === 'assistant' && last.status === 'generating') {
+        updated[updated.length - 1] = { ...last, status: 'done' }
+      }
+      return updated
+    })
+  }, [])
 
   const togglePin = useCallback((index: number): void => {
     const target = messagesRef.current[index]

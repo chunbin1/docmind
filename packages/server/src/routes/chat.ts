@@ -17,6 +17,7 @@ import {
   type ChatMessageRow, type ChatRole, type ChatStatus,
 } from '../services/chatStore.js'
 import { streamAndPersist } from '../services/chatGeneration.js'
+import { registerGeneration, unregisterGeneration, abortGeneration } from '../services/generationRegistry.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
@@ -255,6 +256,14 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true }
   })
 
+  // 显式停止：中断本用户正在进行的生成（区别于单纯断连——后者仍会续写落库）。
+  app.post('/chat/stop', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    const stopped = abortGeneration(user.id)
+    return { ok: true, stopped }
+  })
+
   app.post<{ Body: StreamBody }>('/chat/stream', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
@@ -333,12 +342,14 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           { role: 'user', content: message },
         ]
 
+        // 显式取消通道：POST /chat/stop 会 abort 这个 controller，真正中断 LLM 生成。
+        const ac = registerGeneration(user.id)
         await withSpan('llm_generation', async () => {
           spanMeta('provider', PROVIDER)
           const t0 = performance.now()
           let firstAt = 0
           try {
-            const stream = streamChat({ messages: llmMessages, system: finalSystem, tag: 'chat/stream' })
+            const stream = streamChat({ messages: llmMessages, system: finalSystem, tag: 'chat/stream', signal: ac.signal })
             const wrapped = (async function* () {
               for await (const text of stream) {
                 if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
@@ -349,15 +360,18 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
               assistantId: asst.id,
               stream: wrapped,
               send: (text) => trySend({ text }),
+              signal: ac.signal,
             })
             spanOutput(out)
             spanMeta('outputTokens', estimateTokens(out))
+            spanMeta('stopped', ac.signal.aborted)
             try { trySend({ done: true }) } catch { /* client gone */ }
           } catch (err) {
             app.log.error(err)
             try { trySend({ error: err instanceof Error ? err.message : 'Unknown error' }) } catch { /* client gone */ }
             throw err
           } finally {
+            unregisterGeneration(user.id, ac)
             try { reply.raw.end() } catch { /* already ended */ }
           }
         })

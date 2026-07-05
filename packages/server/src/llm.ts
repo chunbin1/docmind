@@ -19,15 +19,19 @@ async function* streamAnthropic({
   messages,
   system,
   maxTokens = 2048,
+  signal,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-  const stream = await client.messages.stream({
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
-    max_tokens: maxTokens,
-    system,
-    messages: messages.map(({ role, content }) => ({ role, content })),
-  })
+  const stream = await client.messages.stream(
+    {
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      max_tokens: maxTokens,
+      system,
+      messages: messages.map(({ role, content }) => ({ role, content })),
+    },
+    { signal },
+  )
 
   for await (const chunk of stream) {
     if (
@@ -67,6 +71,7 @@ async function* streamZhipu({
   messages,
   system,
   maxTokens = 2048,
+  signal,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new OpenAI({
     apiKey: process.env.ZHIPU_API_KEY,
@@ -82,12 +87,15 @@ async function* streamZhipu({
   for (let i = 0; i < models.length; i++) {
     const model = models[i]
     try {
-      const stream = await client.chat.completions.create({
-        model,
-        max_tokens: maxTokens,
-        stream: true,
-        messages: chat,
-      })
+      const stream = await client.chat.completions.create(
+        {
+          model,
+          max_tokens: maxTokens,
+          stream: true,
+          messages: chat,
+        },
+        { signal },
+      )
 
       for await (const chunk of stream) {
         const text = chunk.choices[0]?.delta?.content
