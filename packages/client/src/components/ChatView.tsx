@@ -107,6 +107,7 @@ export function ChatView({ user, onLogout }: Props) {
                 isError={msg.isError}
                 pinned={msg.pinned}
                 compactedCount={msg.compactedCount}
+                reasoning={msg.reasoning}
                 isStreaming={
                   streaming && i === messages.length - 1 && msg.role === 'assistant'
                 }

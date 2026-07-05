@@ -116,6 +116,15 @@ export function useChat(userId: string | null): UseChatReturn {
     })
   }
 
+  const appendReasoningToLast = (text: string): void => {
+    setMessages(prev => {
+      const updated = [...prev]
+      const last = updated[updated.length - 1]
+      updated[updated.length - 1] = { ...last, reasoning: (last.reasoning ?? '') + text }
+      return updated
+    })
+  }
+
   const setLastError = (error: string): void => {
     setMessages(prev => {
       const updated = [...prev]
@@ -186,7 +195,7 @@ export function useChat(userId: string | null): UseChatReturn {
     setMessages(prev => [
       ...prev,
       { role: 'user', content: message, status: 'done' },
-      { role: 'assistant', content: '', status: 'generating' },
+      { role: 'assistant', content: '', status: 'generating', reasoning: '' },
     ])
     setStreaming(true)
 
@@ -225,8 +234,9 @@ export function useChat(userId: string | null): UseChatReturn {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           try {
-            const json = JSON.parse(line.slice(6)) as { error?: string; text?: string; done?: boolean }
+            const json = JSON.parse(line.slice(6)) as { error?: string; text?: string; reasoning?: string; done?: boolean }
             if (json.error) throw new Error(json.error)
+            if (json.reasoning) appendReasoningToLast(json.reasoning)
             if (json.text) appendToLast(json.text)
             if (json.done) {
               setMessages(prev => {

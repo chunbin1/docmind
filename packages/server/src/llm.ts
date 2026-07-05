@@ -20,6 +20,7 @@ async function* streamAnthropic({
   system,
   maxTokens = 2048,
   signal,
+  onReasoning,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -34,11 +35,12 @@ async function* streamAnthropic({
   )
 
   for await (const chunk of stream) {
-    if (
-      chunk.type === 'content_block_delta' &&
-      chunk.delta.type === 'text_delta'
-    ) {
-      yield chunk.delta.text
+    if (chunk.type === 'content_block_delta') {
+      if (chunk.delta.type === 'text_delta') {
+        yield chunk.delta.text
+      } else if (chunk.delta.type === 'thinking_delta' && onReasoning) {
+        onReasoning(chunk.delta.thinking)
+      }
     }
   }
 }
@@ -72,6 +74,7 @@ async function* streamZhipu({
   system,
   maxTokens = 2048,
   signal,
+  onReasoning,
 }: StreamChatOptions): AsyncGenerator<string> {
   const client = new OpenAI({
     apiKey: process.env.ZHIPU_API_KEY,
@@ -98,8 +101,10 @@ async function* streamZhipu({
       )
 
       for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content
-        if (text) yield text
+        // reasoning_content 是智谱在 OpenAI 兼容格式上的扩展字段，SDK 类型里没有，需断言。
+        const delta = chunk.choices[0]?.delta as { content?: string; reasoning_content?: string } | undefined
+        if (delta?.reasoning_content && onReasoning) onReasoning(delta.reasoning_content)
+        if (delta?.content) yield delta.content
       }
       return
     } catch (err) {

@@ -7,6 +7,8 @@ export interface StreamAndPersistOpts {
   send: (text: string) => void
   /** When aborted (user pressed Stop), persist the partial answer as terminal. */
   signal?: AbortSignal
+  /** Returns the reasoning (thinking) accumulated so far, persisted alongside content. */
+  getReasoning?: () => string
 }
 
 /**
@@ -26,16 +28,16 @@ export async function streamAndPersist(opts: StreamAndPersistOpts): Promise<stri
       out += text
       try { opts.send(text) } catch { /* client gone — keep generating */ }
     }
-    updateMessageContent(opts.assistantId, out, 'done')
+    updateMessageContent(opts.assistantId, out, 'done', opts.getReasoning?.())
     return out
   } catch (err) {
     if (opts.signal?.aborted) {
       // User stopped generation: keep the partial answer as a finished message.
-      updateMessageContent(opts.assistantId, out, 'done')
+      updateMessageContent(opts.assistantId, out, 'done', opts.getReasoning?.())
       return out
     }
     const msg = err instanceof Error ? err.message : String(err)
-    updateMessageContent(opts.assistantId, out || `出错了：${msg}`, 'error')
+    updateMessageContent(opts.assistantId, out || `出错了：${msg}`, 'error', opts.getReasoning?.())
     throw err
   }
 }

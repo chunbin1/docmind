@@ -19,6 +19,8 @@ export interface StreamChatOptions {
   tag?: string
   /** 取消信号：abort 后底层 SDK 请求会中断，用于「停止生成」。 */
   signal?: AbortSignal
+  /** 推理模型的思考内容（reasoning_content）回调；不设则丢弃。 */
+  onReasoning?: (delta: string) => void
 }
 
 /** A persisted memory note row from SQLite */

@@ -39,6 +39,7 @@ interface ClientChatMessage {
   status: ChatStatus
   compactedCount?: number
   compactedAt?: number
+  reasoning?: string
 }
 
 function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
@@ -51,6 +52,7 @@ function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
     status: row.status,
     compactedCount: row.compacted_count ?? undefined,
     compactedAt: row.compacted_at ?? undefined,
+    reasoning: row.reasoning ?? undefined,
   }
 }
 
@@ -227,6 +229,7 @@ interface NudgeBody {
 
 type SSEPayload =
   | { text: string }
+  | { reasoning: string }
   | { done: true }
   | { error: string }
 
@@ -349,7 +352,11 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           const t0 = performance.now()
           let firstAt = 0
           try {
-            const stream = streamChat({ messages: llmMessages, system: finalSystem, tag: 'chat/stream', signal: ac.signal })
+            let reasoningOut = ''
+            const stream = streamChat({
+              messages: llmMessages, system: finalSystem, tag: 'chat/stream', signal: ac.signal,
+              onReasoning: (delta) => { reasoningOut += delta; try { trySend({ reasoning: delta }) } catch { /* client gone */ } },
+            })
             const wrapped = (async function* () {
               for await (const text of stream) {
                 if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
@@ -361,6 +368,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
               stream: wrapped,
               send: (text) => trySend({ text }),
               signal: ac.signal,
+              getReasoning: () => reasoningOut,
             })
             spanOutput(out)
             spanMeta('outputTokens', estimateTokens(out))

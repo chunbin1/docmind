@@ -15,6 +15,7 @@ export interface ChatMessageRow {
   compacted_count: number | null
   compacted_at: number | null
   created_at: string
+  reasoning: string | null
 }
 
 export interface AppendInput {
@@ -45,6 +46,8 @@ export function initChatTables(db: DB): void {
     );
     CREATE INDEX IF NOT EXISTS idx_chat_user_seq ON chat_messages(user_id, seq);
   `)
+  // idempotent 迁移：为已存在的表补上 reasoning 列（推理模型的思考内容）。
+  try { db.exec('ALTER TABLE chat_messages ADD COLUMN reasoning TEXT') } catch { /* 列已存在 */ }
   // Crash recovery: no in-flight generation survives a process restart, so any
   // lingering 'generating' row is stale — mark it errored so clients stop polling.
   db.prepare("UPDATE chat_messages SET status='error' WHERE status='generating'").run()
@@ -82,8 +85,13 @@ export function getMessages(userId: string): ChatMessageRow[] {
     .all(userId) as ChatMessageRow[]
 }
 
-export function updateMessageContent(id: string, content: string, status: ChatStatus): void {
-  db().prepare('UPDATE chat_messages SET content = ?, status = ? WHERE id = ?').run(content, status, id)
+export function updateMessageContent(id: string, content: string, status: ChatStatus, reasoning?: string): void {
+  if (reasoning === undefined) {
+    db().prepare('UPDATE chat_messages SET content = ?, status = ? WHERE id = ?').run(content, status, id)
+  } else {
+    db().prepare('UPDATE chat_messages SET content = ?, status = ?, reasoning = ? WHERE id = ?')
+      .run(content, status, reasoning || null, id)
+  }
 }
 
 /** Flip a still-generating message to error (no-op if it already finished). Used as a safety net when generation fails before streamAndPersist runs. */

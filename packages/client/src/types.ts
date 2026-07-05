@@ -18,6 +18,8 @@ export interface ChatMessage {
   compactedCount?: number
   /** Unix ms timestamp when compaction happened */
   compactedAt?: number
+  /** 推理模型的思考内容（灰色可折叠展示） */
+  reasoning?: string
 }
 
 /** A single persisted memory note */
