@@ -11,9 +11,37 @@ import { logLlmRequest } from '../llmLog.js'
 import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
+import {
+  getMessages, setPinned, clearMessages,
+  type ChatMessageRow, type ChatRole, type ChatStatus,
+} from '../services/chatStore.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
+
+interface ClientChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  pinned?: boolean
+  isError?: boolean
+  status: ChatStatus
+  compactedCount?: number
+  compactedAt?: number
+}
+
+function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    pinned: row.pinned ? true : undefined,
+    isError: row.status === 'error' ? true : undefined,
+    status: row.status,
+    compactedCount: row.compacted_count ?? undefined,
+    compactedAt: row.compacted_at ?? undefined,
+  }
+}
 
 // 工具定义（OpenAI function calling 格式）
 const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
@@ -195,6 +223,29 @@ type SSEPayload =
 
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok', provider: PROVIDER }))
+
+  app.get('/chat/messages', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    return { messages: getMessages(user.id).map(rowToChatMessage) }
+  })
+
+  app.patch<{ Params: { id: string }; Body: { pinned: boolean } }>(
+    '/chat/messages/:id',
+    async (request, reply) => {
+      const user = currentUser(request)
+      if (!user) return reply.status(401).send({ error: 'unauthorized' })
+      setPinned(user.id, request.params.id, !!request.body?.pinned)
+      return { ok: true }
+    },
+  )
+
+  app.delete('/chat/messages', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    clearMessages(user.id)
+    return { ok: true }
+  })
 
   app.post<{ Body: StreamBody }>('/chat/stream', async (request, reply) => {
     const user = currentUser(request)
