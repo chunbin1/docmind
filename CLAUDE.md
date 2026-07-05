@@ -75,6 +75,8 @@ Managed with pnpm workspaces (`pnpm-workspace.yaml`). Root `package.json` has co
 - **`services/memoryStore.ts`** — SQLite-backed memory store via `better-sqlite3`. FTS5 full-text search. Max 100 notes, 200 chars each. Auto-evicts oldest when over limit. Exports `DB` type shared by other stores.
 - **`services/memoryVector.ts`** — ChromaDB integration for semantic (vector) search. Falls back gracefully if ChromaDB is unavailable.
 - **`services/documentStore.ts`** — SQLite `documents` table (id, filename, size, chunk_count). Shares the memory DB connection.
+- **`services/chatStore.ts`** — SQLite `chat_messages` table (per-user single conversation, `seq` ordering, `status` = generating/done/error, pinned/summary metadata). Server-side source of truth for chat history. On startup flips any lingering `generating` rows to `error` (crash recovery). Shares the memory DB connection.
+- **`services/chatGeneration.ts`** — `streamAndPersist`: consumes the LLM stream to completion even if the client disconnects (send() failures are swallowed), persisting the full answer via `updateMessageContent`. This is what lets a refreshed-away answer still finish and be recovered.
 - **`services/documentVector.ts`** — ChromaDB `docmind_docs` collection. `upsertChunks`, `searchChunks` (filter by doc_id), `getAllChunksByDoc`. `ZhipuEmbeddingFunction` attached.
 - **`services/pdfParser.ts`** — `pdf-parse` (CJS via `createRequire`) + recursive character splitter (500-char chunks, 50 overlap).
 - **`services/embeddings.ts`** — Zhipu `embedding-3` API via native `fetch` (OpenAI SDK returned zero vectors for Zhipu). `embedBatch` chunks input into ≤64 (Zhipu API limit). Exports `ZhipuEmbeddingFunction`.
@@ -87,7 +89,7 @@ Managed with pnpm workspaces (`pnpm-workspace.yaml`). Root `package.json` has co
 
 ### Frontend (`packages/client/src/`)
 
-- **`hooks/useChat.ts`** — Central state hook: sends messages, reads SSE stream via `fetch` + `ReadableStream`, manages message history in state + localStorage (50-message cap), triggers auto-compression when token count exceeds 12000, handles pinning.
+- **`hooks/useChat.ts`** — Central state hook: loads history from the server (`GET /api/chat/messages`, server is the source of truth — no localStorage), optimistically appends the outgoing turn, reads the SSE stream via `fetch` + `ReadableStream`. On mount, if the last message is still `generating`, polls the server (~1s, ≤2min cap) to recover an answer that finished after a refresh. Triggers auto-compression when token count exceeds 12000, handles pinning (PATCH) and clear (DELETE). Uses a `runId` token + `mountedRef` (StrictMode-safe) to prevent stale polls from overwriting a newer account's state.
 - **`App.tsx`** — Top-level layout: sidebar + chat area.
 - **`components/Message.tsx`** — Renders user and assistant messages; assistant messages use `react-markdown`; supports pin button and summary-collapse bar.
 - **`components/ChatInput.tsx`** — Textarea input (Enter sends, Shift+Enter newlines); shows Stop button during streaming.
@@ -149,7 +151,7 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 - **Token estimation**: `Math.ceil(text.length / 3)` (character-based approximation)
 - **History compression**: When accumulated tokens > 12000, `useChat` calls `POST /api/chat/compact` to summarize old messages; pinned messages are never compressed or trimmed.
 - **Auto-pin keywords**: Messages containing `记住这个`, `重要`, `remember this`, `important` are auto-pinned.
-- **localStorage persistence**: Saved 500ms after streaming ends (debounced).
+- **Server-side chat persistence**: Chat history lives in SQLite (`chat_messages`), not localStorage. Generation is decoupled from the browser connection — the server finishes and persists the answer even if the client refreshes/disconnects; on reload the client fetches from the server and polls if the last turn is still `generating` (ChatGPT-style recovery). See `docs/superpowers/specs/2026-07-05-server-side-chat-persistence-design.md`.
 - **CSS Modules**: All component styles are scoped (`*.module.css`).
 - **ES Modules only**: No CommonJS — all files use `import`/`export`.
 
@@ -158,8 +160,11 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Provider status |
-| POST | `/api/chat/stream` | SSE streaming chat (with tool calling + memory) |
-| POST | `/api/chat/compact` | Summarize history + extract facts |
+| POST | `/api/chat/stream` | SSE streaming chat (persists user + assistant msgs; keeps generating after client disconnect) |
+| GET | `/api/chat/messages` | Load the user's conversation (source of truth for the client) |
+| PATCH | `/api/chat/messages/:id` | Toggle a message's pinned flag |
+| DELETE | `/api/chat/messages` | Clear the user's conversation |
+| POST | `/api/chat/compact` | Summarize messages (by id) + replace them with a summary row + extract facts |
 | POST | `/api/chat/nudge` | Silently extract facts from recent messages |
 | GET | `/api/memory` | List all memory notes |
 | POST | `/api/memory` | Add a memory note |
