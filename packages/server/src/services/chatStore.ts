@@ -92,3 +92,29 @@ export function hasGenerating(userId: string): boolean {
     .get(userId)
   return !!row
 }
+
+export function setPinned(userId: string, id: string, pinned: boolean): void {
+  db().prepare('UPDATE chat_messages SET pinned = ? WHERE id = ? AND user_id = ?')
+    .run(pinned ? 1 : null, id, userId)
+}
+
+export function clearMessages(userId: string): void {
+  db().prepare('DELETE FROM chat_messages WHERE user_id = ?').run(userId)
+}
+
+export function replaceForCompaction(userId: string, deleteIds: string[], summary: string): void {
+  const tx = db().transaction(() => {
+    const del = db().prepare('DELETE FROM chat_messages WHERE id = ? AND user_id = ?')
+    for (const id of deleteIds) del.run(id, userId)
+    // Summary becomes the earliest message: one below the current min seq.
+    const { prev } = db()
+      .prepare('SELECT COALESCE(MIN(seq),1)-1 AS prev FROM chat_messages WHERE user_id = ?')
+      .get(userId) as { prev: number }
+    db().prepare(`
+      INSERT INTO chat_messages
+        (id, user_id, seq, role, content, status, pinned, compacted_count, compacted_at, created_at)
+      VALUES (?, ?, ?, 'summary', ?, 'done', NULL, ?, ?, ?)
+    `).run(genId(), userId, prev, summary, deleteIds.length, Date.now(), new Date().toISOString())
+  })
+  tx()
+}
