@@ -17,6 +17,18 @@ function totalTokens(messages: ChatMessage[]): number {
   return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
 }
 
+// A refresh mid-stream persists the assistant placeholder too. If no chunk had
+// arrived yet its content is empty, and on reload the stream is dead — leaving a
+// blank AI bubble stuck forever. Drop that trailing empty placeholder on load;
+// a partial answer (non-empty) is kept since it still has value.
+function dropDeadPlaceholder(messages: ChatMessage[]): ChatMessage[] {
+  const last = messages[messages.length - 1]
+  if (last && last.role === 'assistant' && !last.content.trim() && !last.isError) {
+    return messages.slice(0, -1)
+  }
+  return messages
+}
+
 export function useChat(userId: string | null): UseChatReturn {
   // Chat history is stored per account so users on the same browser never see
   // each other's conversations.
@@ -46,7 +58,7 @@ export function useChat(userId: string | null): UseChatReturn {
           raw = legacy
         }
       }
-      setMessages(raw ? (JSON.parse(raw) as ChatMessage[]) : [])
+      setMessages(raw ? dropDeadPlaceholder(JSON.parse(raw) as ChatMessage[]) : [])
     } catch {
       setMessages([])
     }
