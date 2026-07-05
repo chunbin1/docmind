@@ -863,7 +863,6 @@ import cookie from '@fastify/cookie'
 process.env.AUTH_DISABLED = 'true'
 
 import { initChatTables, appendMessage, getMessages } from '../services/chatStore.js'
-import { initDb } from '../services/memoryStore.js'
 import { chatRoutes } from './chat.js'
 
 test('POST /chat/compact 用空 ids 时不改动对话（边界短路）', async () => {
