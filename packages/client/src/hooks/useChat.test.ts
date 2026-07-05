@@ -8,6 +8,8 @@ function jsonRes(body: unknown) {
   return { ok: true, status: 200, json: async () => body } as unknown as Response
 }
 
+const noop = () => {}
+
 afterEach(() => { vi.unstubAllGlobals() })
 
 test('加载：挂载时从 GET /messages 填充', async () => {
@@ -17,7 +19,7 @@ test('加载：挂载时从 GET /messages 填充', async () => {
   ]
   vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ messages })))
 
-  const { result } = renderHook(() => useChat('u1'))
+  const { result } = renderHook(() => useChat('u1', 'c1', noop))
   await waitFor(() => expect(result.current.loading).toBe(false))
   expect(result.current.messages.map(m => m.content)).toEqual(['你好', '你也好'])
 })
@@ -37,7 +39,7 @@ test('轮询恢复：末条 generating → 轮询到 done 后停止并显示完�
     return jsonRes({ messages: calls === 1 ? gen : done })
   }))
 
-  const { result } = renderHook(() => useChat('u1'))
+  const { result } = renderHook(() => useChat('u1', 'c1', noop))
   await waitFor(() =>
     expect(result.current.messages.some(m => m.content === '广州今天晴')).toBe(true),
     { timeout: 3000 },
@@ -46,7 +48,7 @@ test('轮询恢复：末条 generating → 轮询到 done 后停止并显示完�
 
 test('加载失败：GET 出错时 loadError=true 且消息为空', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network') }))
-  const { result } = renderHook(() => useChat('u1'))
+  const { result } = renderHook(() => useChat('u1', 'c1', noop))
   await waitFor(() => expect(result.current.loadError).toBe(true))
   expect(result.current.messages).toEqual([])
 })
@@ -87,9 +89,10 @@ test('并发防护：userId 切换后，旧账号飞行中的轮询结果不得�
     return jsonRes({ messages: u2Done })
   }))
 
-  const { result, rerender } = renderHook(({ userId }) => useChat(userId), {
-    initialProps: { userId: 'u1' as string | null },
-  })
+  const { result, rerender } = renderHook(
+    ({ userId }) => useChat(userId, 'c1', noop),
+    { initialProps: { userId: 'u1' as string | null } },
+  )
 
   // 等待 u1 首拉完成并进入 generating 状态（轮询已排入 setTimeout）。
   await waitFor(() => expect(result.current.messages.some(m => m.id === 'u1-b')).toBe(true))
@@ -130,7 +133,7 @@ test('卸载防护：unmount 后飞行中的轮询回调不再触发 setState（
   }))
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-  const { result, unmount } = renderHook(() => useChat('u1'))
+  const { result, unmount } = renderHook(() => useChat('u1', 'c1', noop))
   await waitFor(() => expect(result.current.messages.some(m => m.id === 'a' && m.status === 'generating')).toBe(true))
 
   unmount()
@@ -149,7 +152,40 @@ test('StrictMode 回归：mount→模拟卸载→remount 后仍能正常加载�
   ]
   vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ messages })))
 
-  const { result } = renderHook(() => useChat('u1'), { wrapper: StrictMode })
+  const { result } = renderHook(() => useChat('u1', 'c1', noop), { wrapper: StrictMode })
   await waitFor(() => expect(result.current.loading).toBe(false))
   expect(result.current.messages.map(m => m.content)).toEqual(['你好', '你也好'])
+})
+
+test('惰性创建：conversationId 为 null 时首发先 POST /conversations 再流式', async () => {
+  const created: string[] = []
+  const calls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { method?: string; body?: string }) => {
+    calls.push(url)
+    if (url === '/api/chat/conversations' && opts?.method === 'POST') {
+      return jsonRes({ id: 'c-new' })
+    }
+    if (url === '/api/chat/stream') {
+      // 断言 stream body 带上了新会话 id
+      const body = JSON.parse(opts?.body ?? '{}') as { conversationId?: string }
+      created.push(body.conversationId ?? '')
+      // 返回一个立即 done 的 SSE 流
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"text":"你好"}\n\n'))
+          controller.enqueue(new TextEncoder().encode('data: {"done":true}\n\n'))
+          controller.close()
+        },
+      })
+      return { ok: true, status: 200, body: stream } as unknown as Response
+    }
+    return jsonRes({ messages: [] })
+  }) as unknown as typeof fetch)
+
+  const onCreated = vi.fn()
+  const { result } = renderHook(() => useChat('u1', null, onCreated))
+  await act(async () => { await result.current.sendMessage('你好') })
+  expect(calls).toContain('/api/chat/conversations')
+  expect(created).toEqual(['c-new'])
+  expect(onCreated).toHaveBeenCalledWith('c-new')
 })
