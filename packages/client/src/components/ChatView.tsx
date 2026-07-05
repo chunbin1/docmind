@@ -16,7 +16,7 @@ interface Props {
 
 export function ChatView({ user, onLogout }: Props) {
   const {
-    messages, streaming, compacting,
+    messages, streaming, compacting, loading, loadError,
     sendMessage, stopStreaming, clearMessages, togglePin,
   } = useChat(user.id)
   const docs = useDocuments()
@@ -27,6 +27,7 @@ export function ChatView({ user, onLogout }: Props) {
   }, [messages])
 
   const limitReached = !user.unlimited && (user.remaining ?? 0) <= 0
+  const generating = streaming || (messages[messages.length - 1]?.status === 'generating')
 
   return (
     <div className={styles.layout}>
@@ -75,6 +76,8 @@ export function ChatView({ user, onLogout }: Props) {
         </header>
 
         <div className={styles.messages}>
+          {loading && <div className={styles.compactingBar}>正在加载对话…</div>}
+          {loadError && <div className={styles.limitBar}>对话加载失败，请刷新重试。</div>}
           {messages.length === 0 ? (
             <div className={styles.empty}>
               <div className={styles.emptyIcon}>💬</div>
@@ -123,9 +126,9 @@ export function ChatView({ user, onLogout }: Props) {
           </div>
         )}
         <ChatInput
-          onSend={(msg, docIds) => void sendMessage(msg, undefined, docIds)}
+          onSend={(msg, docIds) => void sendMessage(msg, docIds)}
           onStop={stopStreaming}
-          streaming={streaming || compacting}
+          streaming={generating || compacting}
           disabled={limitReached}
           documents={docs.documents}
           attachedIds={docs.attachedIds}

@@ -19,6 +19,7 @@ import { initDocCollection } from './services/documentVector.js'
 import { initEvalTables } from './services/evalStore.js'
 import { initUserTables } from './services/userStore.js'
 import { initTraceTables } from './services/traceStore.js'
+import { initChatTables } from './services/chatStore.js'
 
 const app = Fastify({
   logger: {
@@ -53,6 +54,7 @@ initDocumentTables(sqliteDb)
 initEvalTables(sqliteDb)
 initUserTables(sqliteDb)
 initTraceTables(sqliteDb)
+initChatTables(sqliteDb)
 await initCollection()
 await initDocCollection()
 

@@ -11,9 +11,47 @@ import { logLlmRequest } from '../llmLog.js'
 import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
+import {
+  getMessages, setPinned, clearMessages, appendMessage, hasGenerating, replaceForCompaction,
+  markErrorIfGenerating,
+  type ChatMessageRow, type ChatRole, type ChatStatus,
+} from '../services/chatStore.js'
+import { streamAndPersist } from '../services/chatGeneration.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
+
+const PIN_KEYWORDS = [
+  '记住这个', '记住', '重要', '不要忘记', '关键信息', 'remember this', 'important',
+]
+function isAutoPinned(message: string): boolean {
+  const lower = message.toLowerCase()
+  return PIN_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()))
+}
+
+interface ClientChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  pinned?: boolean
+  isError?: boolean
+  status: ChatStatus
+  compactedCount?: number
+  compactedAt?: number
+}
+
+function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    pinned: row.pinned ? true : undefined,
+    isError: row.status === 'error' ? true : undefined,
+    status: row.status,
+    compactedCount: row.compacted_count ?? undefined,
+    compactedAt: row.compacted_at ?? undefined,
+  }
+}
 
 // 工具定义（OpenAI function calling 格式）
 const TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
@@ -175,13 +213,11 @@ function parseCompactOutput(raw: string): ParsedCompact {
 
 interface StreamBody {
   message: string
-  history?: LLMMessage[]
-  systemPrompt?: string
   docIds?: string[]
 }
 
 interface CompactBody {
-  messages: LLMMessage[]
+  ids: string[]
 }
 
 interface NudgeBody {
@@ -196,25 +232,57 @@ type SSEPayload =
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok', provider: PROVIDER }))
 
+  app.get('/chat/messages', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    return { messages: getMessages(user.id).map(rowToChatMessage) }
+  })
+
+  app.patch<{ Params: { id: string }; Body: { pinned: boolean } }>(
+    '/chat/messages/:id',
+    async (request, reply) => {
+      const user = currentUser(request)
+      if (!user) return reply.status(401).send({ error: 'unauthorized' })
+      setPinned(user.id, request.params.id, !!request.body?.pinned)
+      return { ok: true }
+    },
+  )
+
+  app.delete('/chat/messages', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    clearMessages(user.id)
+    return { ok: true }
+  })
+
   app.post<{ Body: StreamBody }>('/chat/stream', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
     if (!canSend(user)) {
       return reply.status(403).send({
-        error: 'message_limit_reached',
-        limit: MESSAGE_LIMIT,
-        used: user.message_count,
+        error: 'message_limit_reached', limit: MESSAGE_LIMIT, used: user.message_count,
       })
     }
+    const { message, docIds = [] } = request.body
+    if (!message?.trim()) return reply.status(400).send({ error: 'message is required' })
 
-    const { message, history = [], systemPrompt, docIds = [] } = request.body
-
-    if (!message?.trim()) {
-      return reply.status(400).send({ error: 'message is required' })
+    // 单用户单对话：上一条还在生成时拒绝并发。
+    if (hasGenerating(user.id)) {
+      return reply.status(409).send({ error: 'generating_in_progress' })
     }
 
-    // Count this send against the user's quota (no-op for unlimited users via canSend).
     incrementMessageCount(user.id)
+
+    // 历史以 DB 为准（不再信任前端 body）。
+    const prior = getMessages(user.id)
+    const summaryRow = prior.find(m => m.role === 'summary')
+    const history: LLMMessage[] = prior
+      .filter(m => m.role !== 'summary')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, pinned: !!m.pinned }))
+
+    // 落库本轮 user + assistant 占位。
+    appendMessage(user.id, { role: 'user', content: message, pinned: isAutoPinned(message) })
+    const asst = appendMessage(user.id, { role: 'assistant', content: '', status: 'generating' })
 
     try {
       await runInTrace({ route: '/chat/stream', userId: user.id }, async () => {
@@ -236,16 +304,16 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
         const finalSystem = await withSpan('prompt_assembly', async () => {
           const memSection = relevantNotes.length
-            ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
-            : ''
+            ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}` : ''
           const docSection = relevantChunks.length
-            ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
-            : ''
+            ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}` : ''
+          const summarySection = summaryRow
+            ? `--- 早期对话摘要 ---\n${summaryRow.content}` : ''
           const trimmed = trimHistoryByTokens(history)
           if (trimmed.length < history.length) {
             markDegraded('history_trimmed', { dropped: history.length - trimmed.length })
           }
-          const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, docSection, toolSection]
+          const finalSystem = [DEFAULT_SYSTEM, summarySection, memSection, docSection, toolSection]
             .filter(Boolean).join('\n\n')
           spanMeta('finalTokens', estimateTokens(finalSystem))
           return finalSystem
@@ -257,10 +325,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           'Connection': 'keep-alive',
           'X-Accel-Buffering': 'no',
         })
-        const send = (payload: SSEPayload): void => {
+        const trySend = (payload: SSEPayload): void => {
           reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
         }
-        const messages: LLMMessage[] = [
+        const llmMessages: LLMMessage[] = [
           ...trimHistoryByTokens(history),
           { role: 'user', content: message },
         ]
@@ -269,41 +337,56 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           spanMeta('provider', PROVIDER)
           const t0 = performance.now()
           let firstAt = 0
-          let out = ''
           try {
-            const stream = streamChat({ messages, system: finalSystem, tag: 'chat/stream' })
-            for await (const text of stream) {
-              if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
-              out += text
-              send({ text })
-            }
+            const stream = streamChat({ messages: llmMessages, system: finalSystem, tag: 'chat/stream' })
+            const wrapped = (async function* () {
+              for await (const text of stream) {
+                if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
+                yield text
+              }
+            })()
+            const out = await streamAndPersist({
+              assistantId: asst.id,
+              stream: wrapped,
+              send: (text) => trySend({ text }),
+            })
             spanOutput(out)
             spanMeta('outputTokens', estimateTokens(out))
-            send({ done: true })
+            try { trySend({ done: true }) } catch { /* client gone */ }
           } catch (err) {
             app.log.error(err)
-            send({ error: err instanceof Error ? err.message : 'Unknown error' })
-            throw err   // withSpan marks the span error; caught below so it doesn't reach Fastify
+            try { trySend({ error: err instanceof Error ? err.message : 'Unknown error' }) } catch { /* client gone */ }
+            throw err
           } finally {
-            reply.raw.end()
+            try { reply.raw.end() } catch { /* already ended */ }
           }
         })
       })
     } catch {
-      // LLM failure was already sent to the client via SSE and recorded in the trace.
+      // 错误已通过 SSE 告知客户端 + 落库 status=error（streamAndPersist）+ 记入 trace。
+    } finally {
+      // 兜底：若 llm_generation 之前的任一步（记忆/文档检索、prompt_assembly）抛错，
+      // streamAndPersist 不会被调用，asst 占位会永久停在 generating，导致该用户被
+      // hasGenerating 永久 409 锁死。这里保证只要最终仍是 generating 就翻成 error；
+      // 已 done/error（streamAndPersist 已处理）则是 no-op。
+      markErrorIfGenerating(asst.id, '出错了：生成中断')
     }
   })
 
   app.post<{ Body: CompactBody }>('/chat/compact', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    const { messages } = request.body
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return reply.status(400).send({ error: 'messages is required' })
+    const { ids } = request.body
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.status(400).send({ error: 'ids is required' })
     }
 
+    const byId = new Map(getMessages(user.id).map(m => [m.id, m]))
+    const targets = ids.map(id => byId.get(id)).filter((m): m is NonNullable<typeof m> => !!m)
+    if (targets.length === 0) return reply.status(400).send({ error: 'no matching messages' })
+
     return runInTrace({ route: '/chat/compact', userId: user.id }, async () => {
-      const historyText = messages
+      const historyText = targets
         .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`).join('\n')
 
       let rawOutput = ''
@@ -319,6 +402,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       })
 
       const { summary, facts } = parseCompactOutput(rawOutput)
+      replaceForCompaction(user.id, targets.map(m => m.id), summary)
       await withSpan('memory_write', async () => {
         if (facts.length > 0) persistFacts(user.id, facts, 'compact')
         spanMeta('facts', facts.length)
