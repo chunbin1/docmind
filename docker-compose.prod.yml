@@ -22,6 +22,9 @@ services:
     environment:
       - CHROMA_URL=http://chroma:8000
       - PORT=3001
+      # embedding-3 相关块的 cosine 距离普遍在 ~0.5~0.65，默认 0.5 会把正确块
+      # 卡在阈值外，导致每次检索都触发 doc_retrieval_minK 降级。放宽到 0.7。
+      - RAG_DISTANCE_THRESHOLD=0.7
     depends_on:
       - chroma
     volumes:
