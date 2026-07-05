@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Document } from '../types'
 import { useEval } from '../hooks/useEval'
 import { EvalRunDetail } from './EvalRunDetail'
@@ -10,6 +11,7 @@ interface EvalPanelProps {
 
 export function EvalPanel({ documents }: EvalPanelProps) {
   const ev = useEval()
+  const navigate = useNavigate()
   const [selectedDocId, setSelectedDocId] = useState<string>('')
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
@@ -66,6 +68,10 @@ export function EvalPanel({ documents }: EvalPanelProps) {
             <div key={ts.id} className={styles.testSetItem}>
               <span>{ts.name} ({ts.case_count})</span>
               <div className={styles.testSetItemActions}>
+                <button
+                  className={styles.btn}
+                  onClick={() => navigate(`/eval/test-sets/${ts.id}`)}
+                >查看</button>
                 <button
                   className={styles.btn}
                   onClick={() => { void ev.deleteTestSet(ts.id) }}
