@@ -19,7 +19,7 @@ export function ChatView({ user, onLogout }: Props) {
     messages, streaming, compacting, loading, loadError,
     sendMessage, stopStreaming, clearMessages, togglePin,
   } = useChat(user.id)
-  const docs = useDocuments()
+  const docs = useDocuments(user.id)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
