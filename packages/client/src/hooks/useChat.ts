@@ -28,8 +28,15 @@ export function useChat(userId: string | null): UseChatReturn {
   const turnCountRef = useRef(0)
   const messagesRef = useRef<ChatMessage[]>(messages)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 卸载防护：仅在真正卸载时置 false。
+  const mountedRef = useRef(true)
+  // 换号防护：每次"加载本账号对话" effect 开始时递增；
+  // 该 effect 内部发起的首拉 .then 和轮询递归链都捕获当时的 runId，
+  // setMessages 前必须核对 runIdRef.current 未变，否则说明 userId 已经切换，结果作废。
+  const runIdRef = useRef(0)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
+  useEffect(() => () => { mountedRef.current = false }, [])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }
@@ -42,15 +49,18 @@ export function useChat(userId: string | null): UseChatReturn {
     return body.messages
   }, [])
 
-  // 末条 generating 时轮询到 done/error 或超时。
-  const startPolling = useCallback((deadline: number) => {
+  // 末条 generating 时轮询到 done/error 或超时。myRun 是发起本次轮询链时的 runId，
+  // 只要组件仍挂载且 userId 未变（runIdRef.current === myRun）才允许 setMessages。
+  const startPolling = useCallback((deadline: number, myRun: number) => {
     stopPolling()
     pollTimerRef.current = setTimeout(async () => {
+      const isStale = () => !mountedRef.current || runIdRef.current !== myRun
       try {
         const msgs = await fetchMessages()
+        if (isStale()) return
         setMessages(msgs)
         if (lastIsGenerating(msgs) && Date.now() < deadline) {
-          startPolling(deadline)
+          startPolling(deadline, myRun)
         } else if (lastIsGenerating(msgs)) {
           // 超时：把末条标记为中断，停止轮询。
           setMessages(prev => {
@@ -63,8 +73,9 @@ export function useChat(userId: string | null): UseChatReturn {
           })
         }
       } catch {
+        if (isStale()) return
         // 轮询失败静默重试直到超时
-        if (Date.now() < deadline) startPolling(deadline)
+        if (Date.now() < deadline) startPolling(deadline, myRun)
       }
     }, POLL_INTERVAL_MS)
   }, [fetchMessages, stopPolling])
@@ -72,18 +83,20 @@ export function useChat(userId: string | null): UseChatReturn {
   // 加载本账号对话（登出清空）。
   useEffect(() => {
     stopPolling()
+    runIdRef.current += 1
+    const myRun = runIdRef.current
+    const isStale = () => !mountedRef.current || runIdRef.current !== myRun
     if (!userId) { setMessages([]); setLoadError(false); return }
-    let cancelled = false
     setLoading(true); setLoadError(false)
     fetchMessages()
       .then(msgs => {
-        if (cancelled) return
+        if (isStale()) return
         setMessages(msgs)
-        if (lastIsGenerating(msgs)) startPolling(Date.now() + POLL_MAX_MS)
+        if (lastIsGenerating(msgs)) startPolling(Date.now() + POLL_MAX_MS, myRun)
       })
-      .catch(() => { if (!cancelled) { setMessages([]); setLoadError(true) } })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true; stopPolling() }
+      .catch(() => { if (!isStale()) { setMessages([]); setLoadError(true) } })
+      .finally(() => { if (!isStale()) setLoading(false) })
+    return () => { stopPolling() }
   }, [userId, fetchMessages, startPolling, stopPolling])
 
   const appendToLast = (text: string): void => {
