@@ -157,6 +157,80 @@ test('StrictMode 回归：mount→模拟卸载→remount 后仍能正常加载�
   expect(result.current.messages.map(m => m.content)).toEqual(['你好', '你也好'])
 })
 
+test('串流污染防护：A 会话流式中切到 B，A 迟到的 chunk/done 不得污染 B 的 messages', async () => {
+  // cA 首拉返回一条已有消息；cB 首拉返回 B 自己的消息。
+  const cAInitial: ChatMessage[] = [
+    { id: 'cA-0', role: 'user', content: 'A问', status: 'done' },
+  ]
+  const cBInitial: ChatMessage[] = [
+    { id: 'cB-u', role: 'user', content: 'B问', status: 'done' },
+    { id: 'cB-a', role: 'assistant', content: 'B答', status: 'done' },
+  ]
+
+  // A 的 SSE 流：受测试控制的可控 ReadableStream，先吐一个 chunk，然后保持 open。
+  // 真实浏览器里 abort() 会让 fetch 的 reader.read() 立刻 reject(AbortError)——
+  // 这里手动模拟同样的效果，让 mock 的行为忠实反映浏览器 fetch/AbortController 语义。
+  let aController: ReadableStreamDefaultController<Uint8Array> | null = null
+  let aAborted = false
+  const aStream = new ReadableStream<Uint8Array>({
+    start(controller) { aController = controller },
+    pull() {
+      if (aAborted) throw new DOMException('Aborted', 'AbortError')
+    },
+  })
+
+  vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { signal?: AbortSignal }) => {
+    if (url.startsWith('/api/chat/messages')) {
+      if (url.includes('conversationId=cA')) return jsonRes({ messages: cAInitial })
+      if (url.includes('conversationId=cB')) return jsonRes({ messages: cBInitial })
+      return jsonRes({ messages: [] })
+    }
+    if (url === '/api/chat/stream') {
+      // 按"发起请求时的当前会话"路由：此测试里只有 cA 会发起流式请求。
+      opts?.signal?.addEventListener('abort', () => { aAborted = true })
+      return { ok: true, status: 200, body: aStream } as unknown as Response
+    }
+    return jsonRes({})
+  }) as unknown as typeof fetch)
+
+  const { result, rerender } = renderHook(
+    ({ cid }) => useChat('u1', cid, noop),
+    { initialProps: { cid: 'cA' as string | null } },
+  )
+
+  // 等 cA 首拉完成。
+  await waitFor(() => expect(result.current.messages.some(m => m.id === 'cA-0')).toBe(true))
+
+  // 在 cA 发一条消息，触发流式；不等待完成（reader 会一直挂起，因为 aStream 尚未 close）。
+  act(() => { void result.current.sendMessage('继续') })
+
+  // 等第一个 chunk 落地到 messages（assistant 占位内容变为 "A-chunk"）。
+  await act(async () => {
+    aController!.enqueue(new TextEncoder().encode('data: {"text":"A-chunk"}\n\n'))
+    await new Promise(r => setTimeout(r, 20))
+  })
+  await waitFor(() => expect(result.current.messages.some(m => m.content === 'A-chunk')).toBe(true))
+
+  // 切换到 cB：加载 effect 应中断 cA 的 reader，并用 cB 的消息填充。
+  rerender({ cid: 'cB' })
+  await waitFor(() => expect(result.current.messages.some(m => m.id === 'cB-a')).toBe(true))
+  expect(result.current.messages.map(m => m.content)).toEqual(['B问', 'B答'])
+
+  // 现在往 A 的（已作废）流里推送迟到的污染 chunk + done，然后关闭它。
+  await act(async () => {
+    aController!.enqueue(new TextEncoder().encode('data: {"text":"CONTAMINATION"}\n\n'))
+    aController!.enqueue(new TextEncoder().encode('data: {"done":true}\n\n'))
+    aController!.close()
+    await new Promise(r => setTimeout(r, 50))
+  })
+
+  // 断言：B 的消息完好无损，未被 A 的迟到流污染。
+  const lastB = result.current.messages[result.current.messages.length - 1]
+  expect(lastB.content).toBe('B答')
+  expect(lastB.content).not.toContain('CONTAMINATION')
+  expect(lastB.status).toBe('done')
+})
+
 test('惰性创建：conversationId 为 null 时首发先 POST /conversations 再流式', async () => {
   const created: string[] = []
   const calls: string[] = []

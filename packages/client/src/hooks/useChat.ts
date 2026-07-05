@@ -93,6 +93,9 @@ export function useChat(
     runIdRef.current += 1
     const myRun = runIdRef.current
     const isStale = () => !mountedRef.current || runIdRef.current !== myRun
+    // 切会话：中断上一个会话飞行中的客户端 reader（不调 /chat/stop，服务端照常续写落库）。
+    // 惰性建会话时 abortRef.current 仍为 null（controller 稍后才在 sendMessage 里创建），此处不会误伤即将开始的流。
+    abortRef.current?.abort()
     if (!userId || !conversationId) { setMessages([]); setLoadError(false); setLoading(false); return }
     // 本地刚创建的会话：跳过拉取，保留 sendMessage 里已放的乐观占位。
     if (skipLoadForRef.current === conversationId) {
@@ -250,12 +253,18 @@ export function useChat(
         buffer = lines.pop() ?? ''
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
+          // 归属守卫：本流已被切会话/新流取代时不再消费/落地本流的 chunk，避免污染当前会话的 messages。
+          // 同时核对 abortRef.current!==controller（已被新流接管）和 controller.signal.aborted
+          // （已被 abort 但 reader 尚未自然结束、finally 还没来得及清 abortRef——
+          // reader.read() 的 rejection 与已入队的 chunk 之间存在一个消费窗口，仅凭前者不够）。
+          if (abortRef.current !== controller || controller.signal.aborted) break
           try {
             const json = JSON.parse(line.slice(6)) as { error?: string; text?: string; reasoning?: string; done?: boolean }
             if (json.error) throw new Error(json.error)
             if (json.reasoning) appendReasoningToLast(json.reasoning)
             if (json.text) appendToLast(json.text)
             if (json.done) {
+              if (abortRef.current !== controller || controller.signal.aborted) return
               setMessages(prev => {
                 const updated = [...prev]
                 const last = updated[updated.length - 1]
@@ -273,8 +282,12 @@ export function useChat(
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') setLastError(err.message)
     } finally {
-      setStreaming(false)
-      abortRef.current = null
+      // 归属守卫：本流已被切会话/新流取代时，不再动共享的 streaming/abortRef 状态
+      // （那属于新流的所有权，被本流的 finally 清掉会导致新流"看起来"没在流式）。
+      if (abortRef.current === controller) {
+        setStreaming(false)
+        abortRef.current = null
+      }
     }
   }, [streaming, conversationId, compactIfNeeded, triggerNudge, onConversationCreated])
 
