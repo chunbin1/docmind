@@ -12,12 +12,21 @@ import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 import {
-  getMessages, setPinned, clearMessages,
+  getMessages, setPinned, clearMessages, appendMessage, hasGenerating,
   type ChatMessageRow, type ChatRole, type ChatStatus,
 } from '../services/chatStore.js'
+import { streamAndPersist } from '../services/chatGeneration.js'
 
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
+
+const PIN_KEYWORDS = [
+  '记住这个', '记住', '重要', '不要忘记', '关键信息', 'remember this', 'important',
+]
+function isAutoPinned(message: string): boolean {
+  const lower = message.toLowerCase()
+  return PIN_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()))
+}
 
 interface ClientChatMessage {
   id: string
@@ -203,8 +212,6 @@ function parseCompactOutput(raw: string): ParsedCompact {
 
 interface StreamBody {
   message: string
-  history?: LLMMessage[]
-  systemPrompt?: string
   docIds?: string[]
 }
 
@@ -252,20 +259,29 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
     if (!canSend(user)) {
       return reply.status(403).send({
-        error: 'message_limit_reached',
-        limit: MESSAGE_LIMIT,
-        used: user.message_count,
+        error: 'message_limit_reached', limit: MESSAGE_LIMIT, used: user.message_count,
       })
     }
+    const { message, docIds = [] } = request.body
+    if (!message?.trim()) return reply.status(400).send({ error: 'message is required' })
 
-    const { message, history = [], systemPrompt, docIds = [] } = request.body
-
-    if (!message?.trim()) {
-      return reply.status(400).send({ error: 'message is required' })
+    // 单用户单对话：上一条还在生成时拒绝并发。
+    if (hasGenerating(user.id)) {
+      return reply.status(409).send({ error: 'generating_in_progress' })
     }
 
-    // Count this send against the user's quota (no-op for unlimited users via canSend).
     incrementMessageCount(user.id)
+
+    // 历史以 DB 为准（不再信任前端 body）。
+    const prior = getMessages(user.id)
+    const summaryRow = prior.find(m => m.role === 'summary')
+    const history: LLMMessage[] = prior
+      .filter(m => m.role !== 'summary')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, pinned: !!m.pinned }))
+
+    // 落库本轮 user + assistant 占位。
+    appendMessage(user.id, { role: 'user', content: message, pinned: isAutoPinned(message) })
+    const asst = appendMessage(user.id, { role: 'assistant', content: '', status: 'generating' })
 
     try {
       await runInTrace({ route: '/chat/stream', userId: user.id }, async () => {
@@ -287,16 +303,16 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
 
         const finalSystem = await withSpan('prompt_assembly', async () => {
           const memSection = relevantNotes.length
-            ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}`
-            : ''
+            ? `--- 相关记忆 ---\n${relevantNotes.map(n => `- ${n.content}`).join('\n')}` : ''
           const docSection = relevantChunks.length
-            ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}`
-            : ''
+            ? `--- 文档参考 ---\n${relevantChunks.map(c => `[${c.filename} · 块${c.chunk_index}] ${c.content}`).join('\n')}` : ''
+          const summarySection = summaryRow
+            ? `--- 早期对话摘要 ---\n${summaryRow.content}` : ''
           const trimmed = trimHistoryByTokens(history)
           if (trimmed.length < history.length) {
             markDegraded('history_trimmed', { dropped: history.length - trimmed.length })
           }
-          const finalSystem = [systemPrompt ?? DEFAULT_SYSTEM, memSection, docSection, toolSection]
+          const finalSystem = [DEFAULT_SYSTEM, summarySection, memSection, docSection, toolSection]
             .filter(Boolean).join('\n\n')
           spanMeta('finalTokens', estimateTokens(finalSystem))
           return finalSystem
@@ -308,10 +324,10 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           'Connection': 'keep-alive',
           'X-Accel-Buffering': 'no',
         })
-        const send = (payload: SSEPayload): void => {
+        const trySend = (payload: SSEPayload): void => {
           reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`)
         }
-        const messages: LLMMessage[] = [
+        const llmMessages: LLMMessage[] = [
           ...trimHistoryByTokens(history),
           { role: 'user', content: message },
         ]
@@ -320,28 +336,33 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
           spanMeta('provider', PROVIDER)
           const t0 = performance.now()
           let firstAt = 0
-          let out = ''
           try {
-            const stream = streamChat({ messages, system: finalSystem, tag: 'chat/stream' })
-            for await (const text of stream) {
-              if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
-              out += text
-              send({ text })
-            }
+            const stream = streamChat({ messages: llmMessages, system: finalSystem, tag: 'chat/stream' })
+            const wrapped = (async function* () {
+              for await (const text of stream) {
+                if (!firstAt) { firstAt = performance.now(); spanMeta('ttfbMs', Math.round(firstAt - t0)) }
+                yield text
+              }
+            })()
+            const out = await streamAndPersist({
+              assistantId: asst.id,
+              stream: wrapped,
+              send: (text) => trySend({ text }),
+            })
             spanOutput(out)
             spanMeta('outputTokens', estimateTokens(out))
-            send({ done: true })
+            try { trySend({ done: true }) } catch { /* client gone */ }
           } catch (err) {
             app.log.error(err)
-            send({ error: err instanceof Error ? err.message : 'Unknown error' })
-            throw err   // withSpan marks the span error; caught below so it doesn't reach Fastify
+            try { trySend({ error: err instanceof Error ? err.message : 'Unknown error' }) } catch { /* client gone */ }
+            throw err
           } finally {
-            reply.raw.end()
+            try { reply.raw.end() } catch { /* already ended */ }
           }
         })
       })
     } catch {
-      // LLM failure was already sent to the client via SSE and recorded in the trace.
+      // 错误已通过 SSE 告知客户端 + 落库 status=error（streamAndPersist）+ 记入 trace。
     }
   })
 
