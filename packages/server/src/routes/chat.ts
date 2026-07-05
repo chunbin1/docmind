@@ -12,7 +12,7 @@ import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 import {
-  getMessages, setPinned, clearMessages, appendMessage, hasGenerating,
+  getMessages, setPinned, clearMessages, appendMessage, hasGenerating, replaceForCompaction,
   type ChatMessageRow, type ChatRole, type ChatStatus,
 } from '../services/chatStore.js'
 import { streamAndPersist } from '../services/chatGeneration.js'
@@ -216,7 +216,7 @@ interface StreamBody {
 }
 
 interface CompactBody {
-  messages: LLMMessage[]
+  ids: string[]
 }
 
 interface NudgeBody {
@@ -369,13 +369,17 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: CompactBody }>('/chat/compact', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    const { messages } = request.body
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return reply.status(400).send({ error: 'messages is required' })
+    const { ids } = request.body
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.status(400).send({ error: 'ids is required' })
     }
 
+    const byId = new Map(getMessages(user.id).map(m => [m.id, m]))
+    const targets = ids.map(id => byId.get(id)).filter((m): m is NonNullable<typeof m> => !!m)
+    if (targets.length === 0) return reply.status(400).send({ error: 'no matching messages' })
+
     return runInTrace({ route: '/chat/compact', userId: user.id }, async () => {
-      const historyText = messages
+      const historyText = targets
         .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`).join('\n')
 
       let rawOutput = ''
@@ -391,6 +395,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       })
 
       const { summary, facts } = parseCompactOutput(rawOutput)
+      replaceForCompaction(user.id, targets.map(m => m.id), summary)
       await withSpan('memory_write', async () => {
         if (facts.length > 0) persistFacts(user.id, facts, 'compact')
         spanMeta('facts', facts.length)
