@@ -69,13 +69,15 @@ export function initChatTables(db: DB): void {
       user_id     TEXT NOT NULL,
       title       TEXT NOT NULL DEFAULT '${DEFAULT_CONVERSATION_TITLE}',
       created_at  TEXT NOT NULL,
-      updated_at  TEXT NOT NULL
+      updated_at  TEXT NOT NULL,
+      updated_seq INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, updated_at);
   `)
   // idempotent 迁移：补 reasoning 列（推理内容）与 conversation_id 列（多会话）。
   try { db.exec('ALTER TABLE chat_messages ADD COLUMN reasoning TEXT') } catch { /* 列已存在 */ }
   try { db.exec('ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT') } catch { /* 列已存在 */ }
+  try { db.exec('ALTER TABLE conversations ADD COLUMN updated_seq INTEGER NOT NULL DEFAULT 0') } catch { /* 列已存在 */ }
   db.exec('CREATE INDEX IF NOT EXISTS idx_chat_conv_seq ON chat_messages(conversation_id, seq)')
 
   backfillConversations(db)
@@ -104,12 +106,12 @@ function backfillConversations(db: DB): void {
     const convId = genConvId()
     const now = new Date().toISOString()
     db.prepare(`
-      INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO conversations (id, user_id, title, created_at, updated_at, updated_seq)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       convId, user_id,
       firstUser ? titleFromMessage(firstUser.content) : DEFAULT_CONVERSATION_TITLE,
-      bounds.first_at ?? now, bounds.last_at ?? now,
+      bounds.first_at ?? now, bounds.last_at ?? now, nextUpdatedSeq(),
     )
     db.prepare(
       'UPDATE chat_messages SET conversation_id = ? WHERE user_id = ? AND conversation_id IS NULL',
@@ -141,9 +143,9 @@ export function createConversation(userId: string): { id: string } {
   const id = genConvId()
   const now = new Date().toISOString()
   db().prepare(`
-    INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, userId, DEFAULT_CONVERSATION_TITLE, now, now)
+    INSERT INTO conversations (id, user_id, title, created_at, updated_at, updated_seq)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, userId, DEFAULT_CONVERSATION_TITLE, now, now, nextUpdatedSeq())
   return { id }
 }
 
@@ -161,7 +163,7 @@ export function listConversations(userId: string): ConversationSummary[] {
     LEFT JOIN chat_messages m ON m.conversation_id = c.id
     WHERE c.user_id = ?
     GROUP BY c.id
-    ORDER BY c.updated_at DESC
+    ORDER BY c.updated_seq DESC
   `).all(userId) as Array<{
     id: string; title: string; updated_at: string
     message_count: number | null; generating: number | null
@@ -188,9 +190,14 @@ export function setConversationTitle(id: string, title: string): void {
   db().prepare('UPDATE conversations SET title = ? WHERE id = ?').run(title, id)
 }
 
+function nextUpdatedSeq(): number {
+  const { n } = db().prepare('SELECT COALESCE(MAX(updated_seq),0)+1 AS n FROM conversations').get() as { n: number }
+  return n
+}
+
 function touchConversation(id: string): void {
-  db().prepare('UPDATE conversations SET updated_at = ? WHERE id = ?')
-    .run(new Date().toISOString(), id)
+  db().prepare('UPDATE conversations SET updated_at = ?, updated_seq = ? WHERE id = ?')
+    .run(new Date().toISOString(), nextUpdatedSeq(), id)
 }
 
 // === 消息（按会话）===
