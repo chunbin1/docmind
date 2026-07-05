@@ -36,7 +36,15 @@ export function useChat(userId: string | null): UseChatReturn {
   const runIdRef = useRef(0)
 
   useEffect(() => { messagesRef.current = messages }, [messages])
-  useEffect(() => () => { mountedRef.current = false }, [])
+  // StrictMode 下 mount 会先模拟 setup→cleanup→再 setup：必须在 setup 里复位为 true，
+  // 否则模拟卸载的 cleanup 把它永久置 false 后再没有机会变回 true，导致后续所有
+  // setMessages/setLoading/setLoadError 被 isStale() 永久拦截（loading 卡死、消息拉不出来）。
+  // StrictMode 的双调用同步发生在同一次 commit 中，早于任何 async fetch resolve，
+  // 因此不会误伤真正卸载后的防护。
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }

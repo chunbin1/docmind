@@ -1,4 +1,5 @@
 import { test, expect, vi, afterEach } from 'vitest'
+import { StrictMode } from 'react'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { useChat } from './useChat'
 import type { ChatMessage } from '../types'
@@ -139,4 +140,16 @@ test('卸载防护：unmount 后飞行中的轮询回调不再触发 setState（
 
   expect(errorSpy).not.toHaveBeenCalled()
   errorSpy.mockRestore()
+})
+
+test('StrictMode 回归：mount→模拟卸载→remount 后仍能正常加载（loading 结束且 messages 填充）', async () => {
+  const messages: ChatMessage[] = [
+    { id: 'm1', role: 'user', content: '你好', status: 'done' },
+    { id: 'm2', role: 'assistant', content: '你也好', status: 'done' },
+  ]
+  vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ messages })))
+
+  const { result } = renderHook(() => useChat('u1'), { wrapper: StrictMode })
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(result.current.messages.map(m => m.content)).toEqual(['你好', '你也好'])
 })
