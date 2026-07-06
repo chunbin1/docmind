@@ -5,7 +5,7 @@ import {
   initChatTables, createConversation, getConversation, listConversations,
   deleteConversation, setConversationTitle, titleFromMessage,
   appendMessage, getMessages, updateMessageContent, hasGenerating,
-  setPinned, replaceForCompaction, markErrorIfGenerating,
+  replaceForCompaction, markErrorIfGenerating,
   DEFAULT_CONVERSATION_TITLE,
 } from './chatStore.js'
 
@@ -146,14 +146,12 @@ test('崩溃兜底：重新 initChatTables 把遗留 generating 翻成 error', (
   db.close()
 })
 
-test('setPinned / updateMessageContent / markErrorIfGenerating 仍工作', () => {
+test('updateMessageContent / markErrorIfGenerating 仍工作', () => {
   const db = setup()
   const c1 = createConversation('u1').id
   const { id } = appendMessage('u1', c1, { role: 'assistant', content: '', status: 'generating' })
   updateMessageContent(id, '完整答案', 'done')
   assert.equal(getMessages(c1)[0].content, '完整答案')
-  setPinned('u1', id, true)
-  assert.equal(getMessages(c1)[0].pinned, 1)
   markErrorIfGenerating(id, 'fallback') // 已 done → no-op
   assert.equal(getMessages(c1)[0].status, 'done')
   db.close()

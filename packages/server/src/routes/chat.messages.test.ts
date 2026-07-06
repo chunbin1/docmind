@@ -68,18 +68,6 @@ test('GET /api/chat/messages 越权会话 → 404', async () => {
   await app.close(); db.close()
 })
 
-test('PATCH /api/chat/messages/:id 改 pinned', async () => {
-  const { app, db } = await buildApp()
-  const c = createConversation('dev').id
-  const { id } = appendMessage('dev', c, { role: 'user', content: '记住' })
-  const res = await app.inject({
-    method: 'PATCH', url: `/api/chat/messages/${id}`, payload: { pinned: true },
-  })
-  assert.equal(res.statusCode, 200)
-  assert.equal(getMessages(c)[0].pinned, 1)
-  await app.close(); db.close()
-})
-
 test('DELETE /api/chat/conversations/:id 删会话及消息', async () => {
   const { app, db } = await buildApp()
   const c = createConversation('dev').id

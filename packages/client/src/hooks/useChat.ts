@@ -312,19 +312,8 @@ export function useChat(
     })
   }, [])
 
-  const togglePin = useCallback((index: number): void => {
-    const target = messagesRef.current[index]
-    if (!target?.id) return
-    const nextPinned = !target.pinned
-    setMessages(prev => prev.map((m, i) => (i === index ? { ...m, pinned: nextPinned } : m)))
-    fetch(`/api/chat/messages/${target.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pinned: nextPinned }),
-    }).catch(() => {})
-  }, [])
-
   return {
     messages, streaming, compacting, loading, loadError,
-    sendMessage, stopStreaming, togglePin,
+    sendMessage, stopStreaming,
   }
 }

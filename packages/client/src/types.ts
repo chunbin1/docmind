@@ -6,12 +6,10 @@ export type MessageRole = 'user' | 'assistant' | 'summary'
 export interface ChatMessage {
   role: MessageRole
   content: string
-  /** 服务端消息 id（用于 pin/patch） */
+  /** 服务端消息 id */
   id?: string
   /** 生成状态：generating 表示服务端仍在产出 */
   status?: 'generating' | 'done' | 'error'
-  /** If true, this message is never trimmed or compacted */
-  pinned?: boolean
   /** Set to true when the stream ended in an error */
   isError?: boolean
   /** Only present on role==='summary' messages */
@@ -44,7 +42,6 @@ export interface UseChatReturn {
   loadError: boolean
   sendMessage: (message: string, docIds?: string[]) => Promise<void>
   stopStreaming: () => void
-  togglePin: (index: number) => void
 }
 
 /** A persisted document available for attachment */

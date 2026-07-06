@@ -89,11 +89,11 @@ Managed with pnpm workspaces (`pnpm-workspace.yaml`). Root `package.json` has co
 
 ### Frontend (`packages/client/src/`)
 
-- **`hooks/useChat.ts`** — Central state hook: takes `(userId, conversationId, onConversationCreated)` and loads history per-conversation from the server (`GET /api/chat/messages?conversationId=`, server is the source of truth — no localStorage). Optimistically appends the outgoing turn, reads the SSE stream via `fetch` + `ReadableStream`. On mount, if the last message is still `generating`, polls the server (~1s, ≤2min cap) to recover an answer that finished after a refresh. Lazily creates a new conversation on first send if none exists. Aborts the client reader on conversation switch (server continues generating). Triggers auto-compression when token count exceeds 12000, handles pinning (PATCH). Uses a `runId` token + `mountedRef` (StrictMode-safe) to prevent stale polls from overwriting a newer state.
+- **`hooks/useChat.ts`** — Central state hook: takes `(userId, conversationId, onConversationCreated)` and loads history per-conversation from the server (`GET /api/chat/messages?conversationId=`, server is the source of truth — no localStorage). Optimistically appends the outgoing turn, reads the SSE stream via `fetch` + `ReadableStream`. On mount, if the last message is still `generating`, polls the server (~1s, ≤2min cap) to recover an answer that finished after a refresh. Lazily creates a new conversation on first send if none exists. Aborts the client reader on conversation switch (server continues generating). Triggers auto-compression when token count exceeds 12000. Uses a `runId` token + `mountedRef` (StrictMode-safe) to prevent stale polls from overwriting a newer state.
 - **`hooks/useConversations.ts`** — Conversation management hook: lists conversations, tracks the selected conversation, creates/deletes conversations, and polls (~2s, only while some conversation is generating) to refresh the generating-in-progress dot. Exposes `conversations` list, `currentId` (`null` = empty draft), `loading`, and callbacks `selectConversation`/`newConversation`/`deleteConversation`/`onConversationCreated`/`refresh`. Persists the selected id in `localStorage['docmind:currentConv:<userId>']`.
 - **`components/ConversationList.tsx`** — Sidebar conversation list: displays all conversations with titles, updated timestamp, and generating indicator dot. Supports creating new conversation and switching between conversations.
 - **`App.tsx`** — Top-level layout: sidebar (ConversationList + MemoryPanel) + chat area.
-- **`components/Message.tsx`** — Renders user and assistant messages; assistant messages use `react-markdown`; supports pin button and summary-collapse bar.
+- **`components/Message.tsx`** — Renders user and assistant messages; assistant messages use `react-markdown`; supports a summary-collapse bar.
 - **`components/ChatInput.tsx`** — Textarea input (Enter sends, Shift+Enter newlines); shows Stop button during streaming.
 - **`components/MemoryPanel.tsx`** — Sidebar panel showing stored memory notes; supports manual add and delete.
 - **`types.ts`** — Shared types: `MessageRole`, `ChatMessage`, `MemoryNote`, `MemoryStore`, `UseChatReturn`
@@ -151,8 +151,7 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 ### Key Design Decisions
 
 - **Token estimation**: `Math.ceil(text.length / 3)` (character-based approximation)
-- **History compression**: When accumulated tokens > 12000, `useChat` calls `POST /api/chat/compact` to summarize old messages; pinned messages are never compressed or trimmed.
-- **Auto-pin keywords**: Messages containing `记住这个`, `重要`, `remember this`, `important` are auto-pinned.
+- **History compression**: When accumulated tokens > 12000, `useChat` calls `POST /api/chat/compact` to summarize old messages.
 - **Server-side chat persistence**: Chat history lives in SQLite (`chat_messages`), not localStorage. Generation is decoupled from the browser connection — the server finishes and persists the answer even if the client refreshes/disconnects; on reload the client fetches from the server and polls if the last turn is still `generating` (ChatGPT-style recovery). See `docs/superpowers/specs/2026-07-05-server-side-chat-persistence-design.md`.
 - **Multi-conversation**: Each user can maintain multiple independent conversations, stored in SQLite `conversations` table with per-conversation message sequence and generation tracking. Server supports concurrent generation across conversations keyed by `conversationId`. Client uses single-path SSE stream + graceful reader abort on conversation switch; server continues generating and client recovers via polling. Quotas and memory/documents remain user-global (not per-conversation). See `docs/superpowers/specs/2026-07-05-multi-conversation-design.md`.
 - **CSS Modules**: All component styles are scoped (`*.module.css`).
@@ -169,7 +168,6 @@ Tools defined in `TOOLS` array (OpenAI function calling format). Currently: `get
 | POST | `/api/chat/stream` | SSE streaming chat (body carries `conversationId`; persists user + assistant msgs; keeps generating after client disconnect) |
 | POST | `/api/chat/stop` | Abort in-flight generation for a conversation |
 | GET | `/api/chat/messages` | Load messages for a conversation (query param: `?conversationId=` required; source of truth for the client) |
-| PATCH | `/api/chat/messages/:id` | Toggle a message's pinned flag |
 | POST | `/api/chat/compact` | Summarize messages (by id) + replace them with a summary row + extract facts (body carries `conversationId`) |
 | POST | `/api/chat/nudge` | Silently extract facts from recent messages |
 | GET | `/api/memory` | List all memory notes |

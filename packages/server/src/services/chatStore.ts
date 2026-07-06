@@ -14,7 +14,6 @@ export interface ChatMessageRow {
   role: ChatRole
   content: string
   status: ChatStatus
-  pinned: number | null
   compacted_count: number | null
   compacted_at: number | null
   created_at: string
@@ -25,7 +24,6 @@ export interface AppendInput {
   role: ChatRole
   content: string
   status?: ChatStatus
-  pinned?: boolean
   compactedCount?: number
   compactedAt?: number
 }
@@ -213,7 +211,7 @@ export function appendMessage(userId: string, conversationId: string, m: AppendI
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, userId, conversationId, next, m.role, m.content, m.status ?? 'done',
-    m.pinned ? 1 : null, m.compactedCount ?? null, m.compactedAt ?? null,
+    null, m.compactedCount ?? null, m.compactedAt ?? null,
     new Date().toISOString(),
   )
   touchConversation(conversationId)
@@ -246,11 +244,6 @@ export function hasGenerating(conversationId: string): boolean {
     .prepare("SELECT 1 FROM chat_messages WHERE conversation_id = ? AND status = 'generating' LIMIT 1")
     .get(conversationId)
   return !!row
-}
-
-export function setPinned(userId: string, id: string, pinned: boolean): void {
-  db().prepare('UPDATE chat_messages SET pinned = ? WHERE id = ? AND user_id = ?')
-    .run(pinned ? 1 : null, id, userId)
 }
 
 export function replaceForCompaction(userId: string, conversationId: string, deleteIds: string[], summary: string): void {

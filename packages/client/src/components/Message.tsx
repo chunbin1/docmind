@@ -53,11 +53,8 @@ interface MessageProps {
   content: string
   isError?: boolean
   isStreaming?: boolean
-  pinned?: boolean
   compactedCount?: number
   reasoning?: string
-  index: number
-  onTogglePin?: (index: number) => void
 }
 
 export function Message({
@@ -65,11 +62,8 @@ export function Message({
   content,
   isError,
   isStreaming,
-  pinned,
   compactedCount,
   reasoning,
-  index,
-  onTogglePin,
 }: MessageProps) {
   if (role === 'summary') {
     return <SummaryBar content={content} compactedCount={compactedCount ?? 0} />
@@ -82,7 +76,6 @@ export function Message({
       className={[
         styles.wrapper,
         isAssistant ? styles.assistant : styles.user,
-        pinned ? styles.pinned : '',
       ].join(' ')}
     >
       <div className={styles.avatar}>
@@ -97,15 +90,6 @@ export function Message({
           </div>
         ) : (
           <p>{content}</p>
-        )}
-        {onTogglePin && (
-          <button
-            className={`${styles.pinBtn} ${pinned ? styles.pinActive : ''}`}
-            onClick={() => onTogglePin(index)}
-            title={pinned ? '取消固定' : '固定此消息（截断时不丢弃）'}
-          >
-            {pinned ? '📌' : '📍'}
-          </button>
         )}
       </div>
     </div>

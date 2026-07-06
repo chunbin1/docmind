@@ -12,7 +12,7 @@ import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 import {
-  getMessages, setPinned, appendMessage, hasGenerating, replaceForCompaction,
+  getMessages, appendMessage, hasGenerating, replaceForCompaction,
   markErrorIfGenerating, createConversation, getConversation, listConversations,
   deleteConversation, setConversationTitle, titleFromMessage, DEFAULT_CONVERSATION_TITLE,
   type ChatMessageRow, type ChatRole, type ChatStatus,
@@ -23,19 +23,10 @@ import { registerGeneration, unregisterGeneration, abortGeneration } from '../se
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
 
-const PIN_KEYWORDS = [
-  '记住这个', '记住', '重要', '不要忘记', '关键信息', 'remember this', 'important',
-]
-function isAutoPinned(message: string): boolean {
-  const lower = message.toLowerCase()
-  return PIN_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()))
-}
-
 interface ClientChatMessage {
   id: string
   role: ChatRole
   content: string
-  pinned?: boolean
   isError?: boolean
   status: ChatStatus
   compactedCount?: number
@@ -48,7 +39,6 @@ function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
     id: row.id,
     role: row.role,
     content: row.content,
-    pinned: row.pinned ? true : undefined,
     isError: row.status === 'error' ? true : undefined,
     status: row.status,
     compactedCount: row.compacted_count ?? undefined,
@@ -144,20 +134,15 @@ function estimateTokens(text: string): number {
 }
 
 function trimHistoryByTokens(history: LLMMessage[], maxTokens = 6000): LLMMessage[] {
-  const pinned = history.filter(m => m.pinned)
-  const normal = history.filter(m => !m.pinned)
-  const pinnedCost = pinned.reduce((sum, m) => sum + estimateTokens(m.content), 0)
-  const budget = maxTokens - pinnedCost
-
   let used = 0
-  let cutIndex = normal.length
-  for (let i = normal.length - 1; i >= 0; i--) {
-    const cost = estimateTokens(normal[i].content)
-    if (used + cost > budget) { cutIndex = i + 1; break }
+  let cutIndex = history.length
+  for (let i = history.length - 1; i >= 0; i--) {
+    const cost = estimateTokens(history[i].content)
+    if (used + cost > maxTokens) { cutIndex = i + 1; break }
     used += cost
     if (i === 0) cutIndex = 0
   }
-  return [...pinned, ...normal.slice(cutIndex)]
+  return history.slice(cutIndex)
 }
 
 async function getRelevantNotes(userId: string, query: string, topK = 3): Promise<MemoryNote[]> {
@@ -271,16 +256,6 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     return { messages: getMessages(conversationId).map(rowToChatMessage) }
   })
 
-  app.patch<{ Params: { id: string }; Body: { pinned: boolean } }>(
-    '/chat/messages/:id',
-    async (request, reply) => {
-      const user = currentUser(request)
-      if (!user) return reply.status(401).send({ error: 'unauthorized' })
-      setPinned(user.id, request.params.id, !!request.body?.pinned)
-      return { ok: true }
-    },
-  )
-
   // 显式停止：中断本会话正在进行的生成（区别于单纯断连——后者仍会续写落库）。
   app.post<{ Body: { conversationId?: string } }>('/chat/stop', async (request, reply) => {
     const user = currentUser(request)
@@ -320,7 +295,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const summaryRow = prior.find(m => m.role === 'summary')
     const history: LLMMessage[] = prior
       .filter(m => m.role !== 'summary')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, pinned: !!m.pinned }))
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     // 首条用户消息 → 自动生成会话标题（仅当仍是默认标题）。
     if (conv.title === DEFAULT_CONVERSATION_TITLE) {
@@ -328,7 +303,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // 落库本轮 user + assistant 占位（按会话）。
-    appendMessage(user.id, conversationId, { role: 'user', content: message, pinned: isAutoPinned(message) })
+    appendMessage(user.id, conversationId, { role: 'user', content: message })
     const asst = appendMessage(user.id, conversationId, { role: 'assistant', content: '', status: 'generating' })
 
     try {

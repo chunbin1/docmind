@@ -20,7 +20,7 @@ export function ChatView({ user, onLogout }: Props) {
   const convs = useConversations(user.id)
   const {
     messages, streaming, compacting, loading, loadError,
-    sendMessage, stopStreaming, togglePin,
+    sendMessage, stopStreaming,
   } = useChat(user.id, convs.currentId, convs.onConversationCreated)
   const docs = useDocuments(user.id)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -111,17 +111,14 @@ export function ChatView({ user, onLogout }: Props) {
             messages.map((msg, i) => (
               <Message
                 key={i}
-                index={i}
                 role={msg.role}
                 content={msg.content}
                 isError={msg.isError}
-                pinned={msg.pinned}
                 compactedCount={msg.compactedCount}
                 reasoning={msg.reasoning}
                 isStreaming={
                   streaming && i === messages.length - 1 && msg.role === 'assistant'
                 }
-                onTogglePin={togglePin}
               />
             ))
           )}

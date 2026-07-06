@@ -78,32 +78,6 @@
   position: relative;
 }
 
-.pinBtn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.15s;
-  padding: 2px;
-  line-height: 1;
-}
-
-.wrapper:hover .pinBtn {
-  opacity: 0.5;
-}
-
-.pinBtn:hover,
-.pinActive {
-  opacity: 1 !important;
-}
-
-.pinned .bubble {
-  outline: 2px solid var(--purple-light);
-}
 
 /* Summary bar */
 .summaryBar {
