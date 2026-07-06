@@ -6,12 +6,7 @@ import cookie from '@fastify/cookie'
 
 process.env.AUTH_DISABLED = 'true' // currentUser 返回 dev 用户(id='dev')
 
-// NOTE: chatStore.js / chat.js (which transitively imports auth.js) must be loaded
-// via dynamic import() *after* the env assignment above. ESM hoists static `import`
-// statements above all other top-level code in a file, so a static import here would
-// evaluate auth.ts's module-level `AUTH_DISABLED` constant before the assignment runs,
-// making currentUser() always return null regardless of source-line order.
-const { initChatTables, appendMessage, getMessages } = await import('../services/chatStore.js')
+const { initChatTables, createConversation, appendMessage, getMessages, listConversations, getConversation } = await import('../services/chatStore.js')
 const { chatRoutes } = await import('./chat.js')
 
 async function buildApp() {
@@ -23,37 +18,71 @@ async function buildApp() {
   return { app, db }
 }
 
-test('GET /api/chat/messages 按 seq 返回并映射 error→isError', async () => {
+test('POST /api/chat/conversations 建会话并返回 id', async () => {
   const { app, db } = await buildApp()
-  appendMessage('dev', { role: 'user', content: '问' })
-  appendMessage('dev', { role: 'assistant', content: '答', status: 'done' })
-  appendMessage('dev', { role: 'assistant', content: '坏', status: 'error' })
-  const res = await app.inject({ method: 'GET', url: '/api/chat/messages' })
+  const res = await app.inject({ method: 'POST', url: '/api/chat/conversations' })
   assert.equal(res.statusCode, 200)
-  const body = res.json() as { messages: Array<{ role: string; content: string; isError?: boolean }> }
+  const body = res.json() as { id: string }
+  assert.ok(body.id)
+  assert.equal(getConversation(body.id)?.user_id, 'dev')
+  await app.close(); db.close()
+})
+
+test('GET /api/chat/conversations 列出本用户会话', async () => {
+  const { app, db } = await buildApp()
+  createConversation('dev')
+  const res = await app.inject({ method: 'GET', url: '/api/chat/conversations' })
+  assert.equal(res.statusCode, 200)
+  const body = res.json() as { conversations: Array<{ id: string }> }
+  assert.equal(body.conversations.length, 1)
+  await app.close(); db.close()
+})
+
+test('GET /api/chat/messages 需 conversationId，按 seq 返回并映射 error→isError', async () => {
+  const { app, db } = await buildApp()
+  const c = createConversation('dev').id
+  appendMessage('dev', c, { role: 'user', content: '问' })
+  appendMessage('dev', c, { role: 'assistant', content: '答', status: 'done' })
+  appendMessage('dev', c, { role: 'assistant', content: '坏', status: 'error' })
+  const res = await app.inject({ method: 'GET', url: `/api/chat/messages?conversationId=${c}` })
+  assert.equal(res.statusCode, 200)
+  const body = res.json() as { messages: Array<{ content: string; isError?: boolean }> }
   assert.equal(body.messages.length, 3)
   assert.equal(body.messages[0].content, '问')
   assert.equal(body.messages[2].isError, true)
   await app.close(); db.close()
 })
 
-test('PATCH /api/chat/messages/:id 改 pinned', async () => {
+test('GET /api/chat/messages 缺 conversationId → 400', async () => {
   const { app, db } = await buildApp()
-  const { id } = appendMessage('dev', { role: 'user', content: '记住' })
-  const res = await app.inject({
-    method: 'PATCH', url: `/api/chat/messages/${id}`,
-    payload: { pinned: true },
-  })
-  assert.equal(res.statusCode, 200)
-  assert.equal(getMessages('dev')[0].pinned, 1)
+  const res = await app.inject({ method: 'GET', url: '/api/chat/messages' })
+  assert.equal(res.statusCode, 400)
   await app.close(); db.close()
 })
 
-test('DELETE /api/chat/messages 清空', async () => {
+test('GET /api/chat/messages 越权会话 → 404', async () => {
   const { app, db } = await buildApp()
-  appendMessage('dev', { role: 'user', content: 'x' })
-  const res = await app.inject({ method: 'DELETE', url: '/api/chat/messages' })
+  const other = createConversation('someone-else').id
+  const res = await app.inject({ method: 'GET', url: `/api/chat/messages?conversationId=${other}` })
+  assert.equal(res.statusCode, 404)
+  await app.close(); db.close()
+})
+
+test('DELETE /api/chat/conversations/:id 删会话及消息', async () => {
+  const { app, db } = await buildApp()
+  const c = createConversation('dev').id
+  appendMessage('dev', c, { role: 'user', content: 'x' })
+  const res = await app.inject({ method: 'DELETE', url: `/api/chat/conversations/${c}` })
   assert.equal(res.statusCode, 200)
-  assert.equal(getMessages('dev').length, 0)
+  assert.equal(listConversations('dev').length, 0)
+  assert.equal(getMessages(c).length, 0)
+  await app.close(); db.close()
+})
+
+test('DELETE /api/chat/conversations/:id 越权 → 404', async () => {
+  const { app, db } = await buildApp()
+  const other = createConversation('someone-else').id
+  const res = await app.inject({ method: 'DELETE', url: `/api/chat/conversations/${other}` })
+  assert.equal(res.statusCode, 404)
   await app.close(); db.close()
 })

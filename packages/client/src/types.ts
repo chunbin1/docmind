@@ -6,12 +6,10 @@ export type MessageRole = 'user' | 'assistant' | 'summary'
 export interface ChatMessage {
   role: MessageRole
   content: string
-  /** 服务端消息 id（用于 pin/patch） */
+  /** 服务端消息 id */
   id?: string
   /** 生成状态：generating 表示服务端仍在产出 */
   status?: 'generating' | 'done' | 'error'
-  /** If true, this message is never trimmed or compacted */
-  pinned?: boolean
   /** Set to true when the stream ended in an error */
   isError?: boolean
   /** Only present on role==='summary' messages */
@@ -44,8 +42,6 @@ export interface UseChatReturn {
   loadError: boolean
   sendMessage: (message: string, docIds?: string[]) => Promise<void>
   stopStreaming: () => void
-  clearMessages: () => void
-  togglePin: (index: number) => void
 }
 
 /** A persisted document available for attachment */
@@ -153,4 +149,28 @@ export interface WaterfallRow {
   depth: number
   leftPct: number
   widthPct: number
+}
+
+// === 多会话类型 ===
+
+/** 会话列表项（对齐 server ConversationSummary） */
+export interface Conversation {
+  id: string
+  title: string
+  updated_at: string
+  message_count: number
+  generating: boolean
+}
+
+/** useConversations 暴露给组件的接口 */
+export interface UseConversationsReturn {
+  conversations: Conversation[]
+  currentId: string | null
+  loading: boolean
+  selectConversation: (id: string) => void
+  newConversation: () => void
+  deleteConversation: (id: string) => void
+  /** useChat 惰性建会话后回调：把新会话设为当前并乐观插入列表 */
+  onConversationCreated: (id: string) => void
+  refresh: () => void
 }

@@ -8,7 +8,6 @@ export type MessageRole = 'user' | 'assistant'
 export interface LLMMessage {
   role: MessageRole
   content: string
-  pinned?: boolean
 }
 
 export interface StreamChatOptions {

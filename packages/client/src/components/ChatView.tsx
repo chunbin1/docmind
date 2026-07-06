@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuthUser } from '../hooks/useAuth'
 import { useChat } from '../hooks/useChat'
+import { useConversations } from '../hooks/useConversations'
 import { useDocuments } from '../hooks/useDocuments'
 import { Message } from './Message'
 import { ChatInput } from './ChatInput'
+import { ConversationList } from './ConversationList'
 import { MemoryPanel } from './MemoryPanel'
 import { EvalPanel } from './EvalPanel'
 import styles from '../App.module.css'
@@ -15,10 +17,11 @@ interface Props {
 }
 
 export function ChatView({ user, onLogout }: Props) {
+  const convs = useConversations(user.id)
   const {
     messages, streaming, compacting, loading, loadError,
-    sendMessage, stopStreaming, clearMessages, togglePin,
-  } = useChat(user.id)
+    sendMessage, stopStreaming,
+  } = useChat(user.id, convs.currentId, convs.onConversationCreated)
   const docs = useDocuments(user.id)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -29,6 +32,11 @@ export function ChatView({ user, onLogout }: Props) {
   const limitReached = !user.unlimited && (user.remaining ?? 0) <= 0
   const generating = streaming || (messages[messages.length - 1]?.status === 'generating')
 
+  // 发送后刷新会话列表：更新标题（首句自动生成）、生成中圆点、排序。
+  const handleSend = (msg: string, docIds?: string[]): void => {
+    void sendMessage(msg, docIds).then(() => convs.refresh())
+  }
+
   return (
     <div className={styles.layout}>
       <aside className={styles.sidebar}>
@@ -37,18 +45,20 @@ export function ChatView({ user, onLogout }: Props) {
           <span className={styles.logoText}>DocMind</span>
         </div>
 
+        <ConversationList
+          conversations={convs.conversations}
+          currentId={convs.currentId}
+          onSelect={convs.selectConversation}
+          onNew={convs.newConversation}
+          onDelete={convs.deleteConversation}
+        />
+
         <MemoryPanel />
 
         {user.isAdmin && <EvalPanel documents={docs.documents} />}
         {user.isAdmin && (
           <Link to="/traces" className={styles.tracesLink}>🔍 Traces</Link>
         )}
-
-        <div className={styles.sideBottom}>
-          <button className={styles.clearBtn} onClick={clearMessages}>
-            清空对话
-          </button>
-        </div>
       </aside>
 
       <main className={styles.main}>
@@ -90,7 +100,7 @@ export function ChatView({ user, onLogout }: Props) {
                   <button
                     key={s}
                     className={styles.suggestion}
-                    onClick={() => void sendMessage(s)}
+                    onClick={() => handleSend(s)}
                   >
                     {s}
                   </button>
@@ -101,17 +111,14 @@ export function ChatView({ user, onLogout }: Props) {
             messages.map((msg, i) => (
               <Message
                 key={i}
-                index={i}
                 role={msg.role}
                 content={msg.content}
                 isError={msg.isError}
-                pinned={msg.pinned}
                 compactedCount={msg.compactedCount}
                 reasoning={msg.reasoning}
                 isStreaming={
                   streaming && i === messages.length - 1 && msg.role === 'assistant'
                 }
-                onTogglePin={togglePin}
               />
             ))
           )}
@@ -127,7 +134,7 @@ export function ChatView({ user, onLogout }: Props) {
           </div>
         )}
         <ChatInput
-          onSend={(msg, docIds) => void sendMessage(msg, docIds)}
+          onSend={handleSend}
           onStop={stopStreaming}
           streaming={generating || compacting}
           disabled={limitReached}

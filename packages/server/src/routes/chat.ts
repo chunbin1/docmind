@@ -12,8 +12,9 @@ import { currentUser } from './auth.js'
 import { canSend, incrementMessageCount, MESSAGE_LIMIT } from '../services/userStore.js'
 import { runInTrace, withSpan, spanInput, spanOutput, spanMeta, markDegraded, currentTraceId, appendSpanLate } from '../services/tracing.js'
 import {
-  getMessages, setPinned, clearMessages, appendMessage, hasGenerating, replaceForCompaction,
-  markErrorIfGenerating,
+  getMessages, appendMessage, hasGenerating, replaceForCompaction,
+  markErrorIfGenerating, createConversation, getConversation, listConversations,
+  deleteConversation, setConversationTitle, titleFromMessage, DEFAULT_CONVERSATION_TITLE,
   type ChatMessageRow, type ChatRole, type ChatStatus,
 } from '../services/chatStore.js'
 import { streamAndPersist } from '../services/chatGeneration.js'
@@ -22,19 +23,10 @@ import { registerGeneration, unregisterGeneration, abortGeneration } from '../se
 const DEFAULT_SYSTEM =
   'You are a helpful assistant. Answer concisely and clearly. Use markdown formatting when appropriate.'
 
-const PIN_KEYWORDS = [
-  '记住这个', '记住', '重要', '不要忘记', '关键信息', 'remember this', 'important',
-]
-function isAutoPinned(message: string): boolean {
-  const lower = message.toLowerCase()
-  return PIN_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()))
-}
-
 interface ClientChatMessage {
   id: string
   role: ChatRole
   content: string
-  pinned?: boolean
   isError?: boolean
   status: ChatStatus
   compactedCount?: number
@@ -47,7 +39,6 @@ function rowToChatMessage(row: ChatMessageRow): ClientChatMessage {
     id: row.id,
     role: row.role,
     content: row.content,
-    pinned: row.pinned ? true : undefined,
     isError: row.status === 'error' ? true : undefined,
     status: row.status,
     compactedCount: row.compacted_count ?? undefined,
@@ -143,20 +134,15 @@ function estimateTokens(text: string): number {
 }
 
 function trimHistoryByTokens(history: LLMMessage[], maxTokens = 6000): LLMMessage[] {
-  const pinned = history.filter(m => m.pinned)
-  const normal = history.filter(m => !m.pinned)
-  const pinnedCost = pinned.reduce((sum, m) => sum + estimateTokens(m.content), 0)
-  const budget = maxTokens - pinnedCost
-
   let used = 0
-  let cutIndex = normal.length
-  for (let i = normal.length - 1; i >= 0; i--) {
-    const cost = estimateTokens(normal[i].content)
-    if (used + cost > budget) { cutIndex = i + 1; break }
+  let cutIndex = history.length
+  for (let i = history.length - 1; i >= 0; i--) {
+    const cost = estimateTokens(history[i].content)
+    if (used + cost > maxTokens) { cutIndex = i + 1; break }
     used += cost
     if (i === 0) cutIndex = 0
   }
-  return [...pinned, ...normal.slice(cutIndex)]
+  return history.slice(cutIndex)
 }
 
 async function getRelevantNotes(userId: string, query: string, topK = 3): Promise<MemoryNote[]> {
@@ -215,11 +201,13 @@ function parseCompactOutput(raw: string): ParsedCompact {
 }
 
 interface StreamBody {
+  conversationId: string
   message: string
   docIds?: string[]
 }
 
 interface CompactBody {
+  conversationId: string
   ids: string[]
 }
 
@@ -236,34 +224,47 @@ type SSEPayload =
 export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.get('/health', async () => ({ status: 'ok', provider: PROVIDER }))
 
-  app.get('/chat/messages', async (request, reply) => {
+  app.get('/chat/conversations', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    return { messages: getMessages(user.id).map(rowToChatMessage) }
+    return { conversations: listConversations(user.id) }
   })
 
-  app.patch<{ Params: { id: string }; Body: { pinned: boolean } }>(
-    '/chat/messages/:id',
-    async (request, reply) => {
-      const user = currentUser(request)
-      if (!user) return reply.status(401).send({ error: 'unauthorized' })
-      setPinned(user.id, request.params.id, !!request.body?.pinned)
-      return { ok: true }
-    },
-  )
-
-  app.delete('/chat/messages', async (request, reply) => {
+  app.post('/chat/conversations', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    clearMessages(user.id)
+    return createConversation(user.id)
+  })
+
+  app.delete<{ Params: { id: string } }>('/chat/conversations/:id', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    // 删除前先中断该会话可能在飞的生成，避免续写落到已删会话。
+    abortGeneration(request.params.id)
+    const ok = deleteConversation(user.id, request.params.id)
+    if (!ok) return reply.status(404).send({ error: 'not_found' })
     return { ok: true }
   })
 
-  // 显式停止：中断本用户正在进行的生成（区别于单纯断连——后者仍会续写落库）。
-  app.post('/chat/stop', async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string } }>('/chat/messages', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    const stopped = abortGeneration(user.id)
+    const { conversationId } = request.query
+    if (!conversationId) return reply.status(400).send({ error: 'conversationId is required' })
+    const conv = getConversation(conversationId)
+    if (!conv || conv.user_id !== user.id) return reply.status(404).send({ error: 'not_found' })
+    return { messages: getMessages(conversationId).map(rowToChatMessage) }
+  })
+
+  // 显式停止：中断本会话正在进行的生成（区别于单纯断连——后者仍会续写落库）。
+  app.post<{ Body: { conversationId?: string } }>('/chat/stop', async (request, reply) => {
+    const user = currentUser(request)
+    if (!user) return reply.status(401).send({ error: 'unauthorized' })
+    const conversationId = request.body?.conversationId
+    if (!conversationId) return reply.status(400).send({ error: 'conversationId is required' })
+    const conv = getConversation(conversationId)
+    if (!conv || conv.user_id !== user.id) return reply.status(404).send({ error: 'not_found' })
+    const stopped = abortGeneration(conversationId)
     return { ok: true, stopped }
   })
 
@@ -275,26 +276,35 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         error: 'message_limit_reached', limit: MESSAGE_LIMIT, used: user.message_count,
       })
     }
-    const { message, docIds = [] } = request.body
+    const { conversationId, message, docIds = [] } = request.body
+    if (!conversationId) return reply.status(400).send({ error: 'conversationId is required' })
     if (!message?.trim()) return reply.status(400).send({ error: 'message is required' })
 
-    // 单用户单对话：上一条还在生成时拒绝并发。
-    if (hasGenerating(user.id)) {
+    const conv = getConversation(conversationId)
+    if (!conv || conv.user_id !== user.id) return reply.status(404).send({ error: 'not_found' })
+
+    // 会话级并发锁：仅当“这条会话”还在生成时拒绝，别的会话不受影响。
+    if (hasGenerating(conversationId)) {
       return reply.status(409).send({ error: 'generating_in_progress' })
     }
 
     incrementMessageCount(user.id)
 
-    // 历史以 DB 为准（不再信任前端 body）。
-    const prior = getMessages(user.id)
+    // 历史以 DB 为准（按会话）。
+    const prior = getMessages(conversationId)
     const summaryRow = prior.find(m => m.role === 'summary')
     const history: LLMMessage[] = prior
       .filter(m => m.role !== 'summary')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, pinned: !!m.pinned }))
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
-    // 落库本轮 user + assistant 占位。
-    appendMessage(user.id, { role: 'user', content: message, pinned: isAutoPinned(message) })
-    const asst = appendMessage(user.id, { role: 'assistant', content: '', status: 'generating' })
+    // 首条用户消息 → 自动生成会话标题（仅当仍是默认标题）。
+    if (conv.title === DEFAULT_CONVERSATION_TITLE) {
+      setConversationTitle(conversationId, titleFromMessage(message))
+    }
+
+    // 落库本轮 user + assistant 占位（按会话）。
+    appendMessage(user.id, conversationId, { role: 'user', content: message })
+    const asst = appendMessage(user.id, conversationId, { role: 'assistant', content: '', status: 'generating' })
 
     try {
       await runInTrace({ route: '/chat/stream', userId: user.id }, async () => {
@@ -346,7 +356,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         ]
 
         // 显式取消通道：POST /chat/stop 会 abort 这个 controller，真正中断 LLM 生成。
-        const ac = registerGeneration(user.id)
+        const ac = registerGeneration(conversationId)
         await withSpan('llm_generation', async () => {
           spanMeta('provider', PROVIDER)
           const t0 = performance.now()
@@ -379,7 +389,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
             try { trySend({ error: err instanceof Error ? err.message : 'Unknown error' }) } catch { /* client gone */ }
             throw err
           } finally {
-            unregisterGeneration(user.id, ac)
+            unregisterGeneration(conversationId, ac)
             try { reply.raw.end() } catch { /* already ended */ }
           }
         })
@@ -398,12 +408,15 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: CompactBody }>('/chat/compact', async (request, reply) => {
     const user = currentUser(request)
     if (!user) return reply.status(401).send({ error: 'unauthorized' })
-    const { ids } = request.body
+    const { conversationId, ids } = request.body
+    if (!conversationId) return reply.status(400).send({ error: 'conversationId is required' })
     if (!Array.isArray(ids) || ids.length === 0) {
       return reply.status(400).send({ error: 'ids is required' })
     }
+    const conv = getConversation(conversationId)
+    if (!conv || conv.user_id !== user.id) return reply.status(404).send({ error: 'not_found' })
 
-    const byId = new Map(getMessages(user.id).map(m => [m.id, m]))
+    const byId = new Map(getMessages(conversationId).map(m => [m.id, m]))
     const targets = ids.map(id => byId.get(id)).filter((m): m is NonNullable<typeof m> => !!m)
     if (targets.length === 0) return reply.status(400).send({ error: 'no matching messages' })
 
@@ -424,7 +437,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       })
 
       const { summary, facts } = parseCompactOutput(rawOutput)
-      replaceForCompaction(user.id, targets.map(m => m.id), summary)
+      replaceForCompaction(user.id, conversationId, targets.map(m => m.id), summary)
       await withSpan('memory_write', async () => {
         if (facts.length > 0) persistFacts(user.id, facts, 'compact')
         spanMeta('facts', facts.length)
